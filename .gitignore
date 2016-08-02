@@ -38,7 +38,6 @@ captures/
 
 # Temporary files
 *.*~
-processor/
 api/build/
 /.gradle/
 /.idea/
