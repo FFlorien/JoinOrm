@@ -3,7 +3,9 @@ package be.florien.joinorm.processor;
 import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.ParameterSpec;
 import com.squareup.javapoet.ParameterizedTypeName;
+import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 import com.squareup.javapoet.WildcardTypeName;
 
@@ -31,12 +33,22 @@ public class DBTableProcessor extends AbstractProcessor {
         for (Element element : roundEnvironment.getElementsAnnotatedWith(JoTable.class)) {
 
             try {
-                ClassName dbTable = ClassName.get(DBTable.class);
-                ClassName pojo = ClassName.bestGuess(String.valueOf(element.getSimpleName()));
-                ParameterizedTypeName parameterizedDBTable = ParameterizedTypeName.get(dbTable, pojo);
+                ClassName dbTableClass = ClassName.get(DBTable.class);
+                ClassName javaObjectClass = ClassName.get((TypeElement) element);
+                ParameterizedTypeName extendsClass = ParameterizedTypeName.get(dbTableClass, javaObjectClass);
+                ParameterizedTypeName anyDBTableClass = ParameterizedTypeName.get(dbTableClass, WildcardTypeName.subtypeOf(TypeName.OBJECT));
+                ParameterSpec otherTable = ParameterSpec.builder(anyDBTableClass, "innerTable").build();
+
+                MethodSpec joinToInnerTable = MethodSpec.methodBuilder("getJoinToInnerTable")
+                        .addParameter(otherTable)
+                        .returns(TypeName.get(String.class))
+                        .addModifiers(Modifier.PROTECTED)
+                        .addStatement("return getJoinOnId(this, \"tutu\", false)")
+                        .build();
                 TypeSpec typeSpec = TypeSpec.classBuilder(element.getSimpleName() + "Table")
                         .addModifiers(Modifier.PUBLIC)
-                        .superclass(parameterizedDBTable)
+                        .superclass(extendsClass)
+                        .addMethod(joinToInnerTable)
                         .build();
 
                 JavaFile.builder("be.florien.joinorm.generated", typeSpec)
