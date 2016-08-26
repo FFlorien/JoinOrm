@@ -6,4 +6,6 @@ targetCompatibility = JavaVersion.VERSION_1_7
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     compile project(path: ':annotation')
+    compile project(path: ':api')
+    compile 'com.squareup:javapoet:1.7.0'
 }

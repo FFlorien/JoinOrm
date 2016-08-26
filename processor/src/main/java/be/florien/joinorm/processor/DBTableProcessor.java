@@ -1,7 +1,13 @@
 package be.florien.joinorm.processor;
 
+import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.JavaFile;
+import com.squareup.javapoet.MethodSpec;
+import com.squareup.javapoet.ParameterizedTypeName;
+import com.squareup.javapoet.TypeSpec;
+import com.squareup.javapoet.WildcardTypeName;
+
 import java.io.IOException;
-import java.io.Writer;
 import java.util.Set;
 
 import javax.annotation.processing.AbstractProcessor;
@@ -10,31 +16,31 @@ import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
-import javax.tools.JavaFileObject;
 
 import be.florien.joinorm.annotation.JoTable;
+import be.florien.joinorm.architecture.DBTable;
 
 @SupportedAnnotationTypes("be.florien.joinorm.annotation.JoTable")
 @SupportedSourceVersion(SourceVersion.RELEASE_7)
-public class DBTableProcessor extends AbstractProcessor{
+public class DBTableProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
         for (Element element : roundEnvironment.getElementsAnnotatedWith(JoTable.class)) {
-        StringBuilder builder = new StringBuilder()
-                .append("package be.florien.joinorm.generated;\n\n")
-                .append("import be.florien.joinorm.architecture.DBTable;\n\n")
-                .append("public class ").append(element.getSimpleName()).append("Table extends DBTable {\n")
-                .append("}");
 
             try {
-                JavaFileObject source = processingEnv.getFiler().createSourceFile("be.florien.joinorm.generated." + element.getSimpleName() + "Table");
+                ClassName dbTable = ClassName.get(DBTable.class);
+                ClassName pojo = ClassName.bestGuess(String.valueOf(element.getSimpleName()));
+                ParameterizedTypeName parameterizedDBTable = ParameterizedTypeName.get(dbTable, pojo);
+                TypeSpec typeSpec = TypeSpec.classBuilder(element.getSimpleName() + "Table")
+                        .addModifiers(Modifier.PUBLIC)
+                        .superclass(parameterizedDBTable)
+                        .build();
 
-                Writer writer = source.openWriter();
-                writer.write(builder.toString());
-                writer.flush();
-                writer.close();
+                JavaFile.builder("be.florien.joinorm.generated", typeSpec)
+                        .build().writeTo(processingEnv.getFiler());
 
             } catch (IOException e) {
                 e.printStackTrace();
