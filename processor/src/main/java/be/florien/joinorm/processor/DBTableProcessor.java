@@ -10,6 +10,7 @@ import com.squareup.javapoet.TypeSpec;
 import com.squareup.javapoet.WildcardTypeName;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -19,8 +20,11 @@ import javax.annotation.processing.SupportedAnnotationTypes;
 import javax.annotation.processing.SupportedSourceVersion;
 import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeMirror;
 
 import be.florien.joinorm.annotation.JoId;
 import be.florien.joinorm.annotation.JoTable;
@@ -32,52 +36,65 @@ public class DBTableProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
-        for (Element element : roundEnvironment.getElementsAnnotatedWith(JoTable.class)) {
+        for (Element classElement : roundEnvironment.getElementsAnnotatedWith(JoTable.class)) {
 
             Element idElement = null;
             for (Element maybeIdElement : roundEnvironment.getElementsAnnotatedWith(JoId.class)) {
-                if (maybeIdElement.getEnclosingElement().equals(element)) {
+                if (maybeIdElement.getEnclosingElement().equals(classElement)) {
                     idElement = maybeIdElement;
                 }
             }
 
             try {
-                ClassName dbTableClass = ClassName.get(DBTable.class);
-                ClassName javaObjectClass = ClassName.get((TypeElement) element);
-                ParameterizedTypeName extendsClass = ParameterizedTypeName.get(dbTableClass, javaObjectClass);
-                ParameterizedTypeName anyDBTableClass = ParameterizedTypeName.get(dbTableClass, WildcardTypeName.subtypeOf(TypeName.OBJECT));
-                ParameterSpec otherTable = ParameterSpec.builder(anyDBTableClass, "innerTable").build();
-                String name = element.getSimpleName() + "Table";
+                ClassName dbTableClassName = ClassName.get(DBTable.class);
+                ClassName modelObjectClassName = ClassName.get((TypeElement) classElement);
+                ParameterizedTypeName paramDBTableClassName = ParameterizedTypeName.get(dbTableClassName, modelObjectClassName);
+                ParameterizedTypeName wildcardDBTableClassName = ParameterizedTypeName.get(dbTableClassName, WildcardTypeName.subtypeOf(TypeName.OBJECT));
+                ParameterSpec wildcardDBTableParameter = ParameterSpec.builder(wildcardDBTableClassName, "innerTable").build();
+                String tableName = classElement.getSimpleName() + "Table";
 
                 MethodSpec constructor = MethodSpec.constructorBuilder()
                         .addModifiers(Modifier.PUBLIC)
-                        .addStatement("super(\"" + name + "\", " + element.getSimpleName() + ".class)")
+                        .addStatement("super(\"" + tableName + "\", " + classElement.getSimpleName() + ".class)")
                         .build();
+
                 MethodSpec joinToInnerTable = MethodSpec.methodBuilder("getJoinToInnerTable")
-                        .addParameter(otherTable)
+                        .addParameter(wildcardDBTableParameter)
                         .returns(TypeName.get(String.class))
                         .addModifiers(Modifier.PROTECTED)
                         .addStatement("return getJoinOnId(this, \"tutu\", false)")
                         .build();
 
                 MethodSpec selectId = MethodSpec.methodBuilder("selectId")
-                        .returns(dbTableClass)
+                        .returns(paramDBTableClassName)
                         .addModifiers(Modifier.PUBLIC)
-                        .addStatement("selectId(\"" +(idElement == null ? "oui" : idElement.getSimpleName()) + "\")")
+                        .addStatement("selectId(\"" + (idElement == null ? "oui" : idElement.getSimpleName()) + "\")")
                         .addStatement("return this")
                         .build();
+
                 MethodSpec getId = MethodSpec.methodBuilder("getId")
                         .returns(String.class)
                         .addModifiers(Modifier.PUBLIC)
-                        .addStatement("return \"" +(idElement == null ? "oui" : idElement.getSimpleName()) + "\"")
+                        .addStatement("return \"" + (idElement == null ? "oui" : idElement.getSimpleName()) + "\"")
                         .build();
-                TypeSpec typeSpec = TypeSpec.classBuilder(name)
+
+                List<MethodSpec> selectMethods = new ArrayList<>();
+
+                for (Element selectable : classElement.getEnclosedElements()) {
+                    if (selectable != idElement && selectable.getKind().equals(ElementKind.FIELD)) {
+                        MethodSpec methodSpec = getSelectMethod(paramDBTableClassName, selectable);
+                        selectMethods.add(methodSpec);
+                    }
+                }
+
+                TypeSpec typeSpec = TypeSpec.classBuilder(tableName)
                         .addModifiers(Modifier.PUBLIC)
-                        .superclass(extendsClass)
+                        .superclass(paramDBTableClassName)
                         .addMethod(constructor)
-                        .addMethod(joinToInnerTable)
                         .addMethod(getId)
                         .addMethod(selectId)
+                        .addMethods(selectMethods)
+                        .addMethod(joinToInnerTable)
                         .build();
 
                 JavaFile.builder("be.florien.joinorm.generated", typeSpec)
@@ -88,5 +105,58 @@ public class DBTableProcessor extends AbstractProcessor {
             }
         }
         return true;
+    }
+
+    private MethodSpec getSelectMethod(ParameterizedTypeName extendsClass, Element selectable) {
+        String typeName;
+        TypeMirror typeMirror = selectable.asType();
+        switch (typeMirror.getKind()) {
+
+            case BOOLEAN:
+                typeName = "Boolean";
+                break;
+            case BYTE:
+                typeName = "Byte";
+                break;
+            case SHORT:
+                typeName = "Short";
+                break;
+            case INT:
+                typeName = "Int";
+                break;
+            case LONG:
+                typeName = "Long";
+                break;
+            case CHAR:
+                typeName = "Char";
+                break;
+            case FLOAT:
+                typeName = "Float";
+                break;
+            case DOUBLE:
+                typeName = "Double";
+                break;
+            case ARRAY:
+                typeName = "Array";
+                break;
+            case DECLARED:
+                DeclaredType declaredType = (DeclaredType) typeMirror;
+                TypeElement typeElement = (TypeElement) declaredType.asElement();
+                typeName = typeElement.getSimpleName().toString();
+                break;
+            default:
+                typeName = "lolType";
+
+        }
+
+        String selectableSimpleName = selectable.getSimpleName().toString();
+        selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
+
+        return MethodSpec.methodBuilder("select" + selectableSimpleName)
+                .returns(extendsClass)
+                .addModifiers(Modifier.PUBLIC)
+                .addStatement("select" + typeName + "(\"" + selectable.getSimpleName() + "\")")
+                .addStatement("return this")
+                .build();
     }
 }
