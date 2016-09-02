@@ -24,6 +24,7 @@ import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 
 import be.florien.joinorm.annotation.JoId;
@@ -36,7 +37,8 @@ public class DBTableProcessor extends AbstractProcessor {
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
-        for (Element classElement : roundEnvironment.getElementsAnnotatedWith(JoTable.class)) {
+        Class<JoTable> aClass = JoTable.class;
+        for (Element classElement : roundEnvironment.getElementsAnnotatedWith(aClass)) {
 
             Element idElement = null;
             for (Element maybeIdElement : roundEnvironment.getElementsAnnotatedWith(JoId.class)) {
@@ -58,12 +60,10 @@ public class DBTableProcessor extends AbstractProcessor {
                         .addStatement("super(\"" + tableName + "\", " + classElement.getSimpleName() + ".class)")
                         .build();
 
-                MethodSpec joinToInnerTable = MethodSpec.methodBuilder("getJoinToInnerTable")
+                MethodSpec.Builder joinToInnerTableBuilder = MethodSpec.methodBuilder("getJoinToInnerTable")
                         .addParameter(wildcardDBTableParameter)
                         .returns(TypeName.get(String.class))
-                        .addModifiers(Modifier.PROTECTED)
-                        .addStatement("return getJoinOnId(this, \"tutu\", false)")
-                        .build();
+                        .addModifiers(Modifier.PROTECTED);
 
                 MethodSpec selectId = MethodSpec.methodBuilder("selectId")
                         .returns(paramDBTableClassName)
@@ -80,12 +80,27 @@ public class DBTableProcessor extends AbstractProcessor {
 
                 List<MethodSpec> selectMethods = new ArrayList<>();
 
-                for (Element selectable : classElement.getEnclosedElements()) {
-                    if (selectable != idElement && selectable.getKind().equals(ElementKind.FIELD)) {
-                        MethodSpec methodSpec = getSelectMethod(paramDBTableClassName, selectable);
+                for (Element field : classElement.getEnclosedElements()) {
+                    if (field != idElement && field.getKind().equals(ElementKind.FIELD)) {
+                        MethodSpec methodSpec = getSelectMethod(paramDBTableClassName, field);
                         selectMethods.add(methodSpec);
                     }
+//                    TypeMirror typeMirror = field.asType();
+//                    Class<TypeKind> declaringClass = typeMirror.getKind().getDeclaringClass();
+//                    JoTable annotation = typeMirror.getAnnotation(aClass);
+//                    if (annotation != null) { // todo verify superclass
+//                        Name fieldName = ((DeclaredType) field).asElement().getSimpleName();
+//                        ClassName fieldTableClassName = ClassName.bestGuess(fieldName + "Table");
+//                        joinToInnerTableBuilder.beginControlFlow("if(innerTable instanceof %s)", fieldTableClassName)
+//                                .addStatement("return getJoinOnRef(innerTable, %s, false)", fieldName + "_id")
+//                                .endControlFlow();
+//                    }else{
+//                        joinToInnerTableBuilder.addStatement("return \"Field == \" +  $S + \" | Type == \" +  $S + \" | DeclaringClass == \" +  $S ", field.getSimpleName(), typeMirror.toString(), declaringClass.getSimpleName());
+//                    }
                 }
+
+                MethodSpec joinToInnerTable = joinToInnerTableBuilder.addStatement("return \"\"")
+                        .build();
 
                 TypeSpec typeSpec = TypeSpec.classBuilder(tableName)
                         .addModifiers(Modifier.PUBLIC)
