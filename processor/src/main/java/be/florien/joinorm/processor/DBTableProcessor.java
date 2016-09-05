@@ -22,6 +22,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
 import javax.lang.model.element.Modifier;
+import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
@@ -82,21 +83,22 @@ public class DBTableProcessor extends AbstractProcessor {
 
                 for (Element field : classElement.getEnclosedElements()) {
                     if (field != idElement && field.getKind().equals(ElementKind.FIELD)) {
-                        MethodSpec methodSpec = getSelectMethod(paramDBTableClassName, field);
-                        selectMethods.add(methodSpec);
+                        MethodSpec method = getSelectMethod(paramDBTableClassName, field);
+                        if (method != null) {
+                            selectMethods.add(method);
+                        }
+                        if (field.asType().getKind() == TypeKind.DECLARED) {
+                            DeclaredType declaredType = (DeclaredType) field.asType();
+                            TypeElement typeElement = (TypeElement) declaredType.asElement();
+                            if (typeElement.getAnnotation(JoTable.class) != null) { // todo verify superclass
+                                Name fieldName = declaredType.asElement().getSimpleName();
+                                ClassName fieldTableClassName = ClassName.bestGuess(fieldName + "Table");
+                                joinToInnerTableBuilder.beginControlFlow("if(innerTable instanceof $T)", fieldTableClassName)
+                                        .addStatement("return getJoinOnRef(innerTable, $S, false)", fieldName + "_id")
+                                        .endControlFlow();
+                            }
+                        }
                     }
-//                    TypeMirror typeMirror = field.asType();
-//                    Class<TypeKind> declaringClass = typeMirror.getKind().getDeclaringClass();
-//                    JoTable annotation = typeMirror.getAnnotation(aClass);
-//                    if (annotation != null) { // todo verify superclass
-//                        Name fieldName = ((DeclaredType) field).asElement().getSimpleName();
-//                        ClassName fieldTableClassName = ClassName.bestGuess(fieldName + "Table");
-//                        joinToInnerTableBuilder.beginControlFlow("if(innerTable instanceof %s)", fieldTableClassName)
-//                                .addStatement("return getJoinOnRef(innerTable, %s, false)", fieldName + "_id")
-//                                .endControlFlow();
-//                    }else{
-//                        joinToInnerTableBuilder.addStatement("return \"Field == \" +  $S + \" | Type == \" +  $S + \" | DeclaringClass == \" +  $S ", field.getSimpleName(), typeMirror.toString(), declaringClass.getSimpleName());
-//                    }
                 }
 
                 MethodSpec joinToInnerTable = joinToInnerTableBuilder.addStatement("return \"\"")
@@ -125,6 +127,7 @@ public class DBTableProcessor extends AbstractProcessor {
     private MethodSpec getSelectMethod(ParameterizedTypeName extendsClass, Element selectable) {
         String typeName;
         TypeMirror typeMirror = selectable.asType();
+        ParameterSpec param = null;
         switch (typeMirror.getKind()) {
 
             case BOOLEAN:
@@ -157,7 +160,12 @@ public class DBTableProcessor extends AbstractProcessor {
             case DECLARED:
                 DeclaredType declaredType = (DeclaredType) typeMirror;
                 TypeElement typeElement = (TypeElement) declaredType.asElement();
-                typeName = typeElement.getSimpleName().toString();
+                param = ParameterSpec.builder(TypeName.get(typeMirror), "otherTable").build();
+                if (typeElement.getAnnotation(JoTable.class) != null) {
+                    typeName = "Table";
+                } else {
+                    return null;
+                }
                 break;
             default:
                 typeName = "lolType";
@@ -167,11 +175,19 @@ public class DBTableProcessor extends AbstractProcessor {
         String selectableSimpleName = selectable.getSimpleName().toString();
         selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
 
-        return MethodSpec.methodBuilder("select" + selectableSimpleName)
+        MethodSpec.Builder builder = MethodSpec.methodBuilder("select" + selectableSimpleName)
                 .returns(extendsClass)
-                .addModifiers(Modifier.PUBLIC)
-                .addStatement("select" + typeName + "(\"" + selectable.getSimpleName() + "\")")
-                .addStatement("return this")
+                .addModifiers(Modifier.PUBLIC);
+        if (param != null) {
+            builder.addStatement("selectTable(otherTable)")
+                    .addParameter(param);
+        } else {
+            builder = builder
+                    .addStatement("select" + typeName + "(\"" + selectable.getSimpleName() + "\")");
+        }
+        builder = builder
+                .addStatement("return this");
+        return builder
                 .build();
     }
 }
