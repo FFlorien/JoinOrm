@@ -1,6 +1,7 @@
 package be.florien.joinorm.processor;
 
 import com.squareup.javapoet.ClassName;
+import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterSpec;
@@ -28,7 +29,9 @@ import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 
+import be.florien.joinorm.annotation.JoField;
 import be.florien.joinorm.annotation.JoId;
+import be.florien.joinorm.annotation.JoIgnore;
 import be.florien.joinorm.annotation.JoTable;
 import be.florien.joinorm.architecture.DBTable;
 
@@ -69,29 +72,25 @@ public class DBTableProcessor extends AbstractProcessor {
                 ParameterSpec wildcardDBTableParameter = ParameterSpec.builder(wildcardDBTableClassName, "innerTable").build();
                 currentTableName = classElement.getSimpleName() + "Table";
 
-                MethodSpec constructor = getConstructors();
+                TypeSpec.Builder builder = TypeSpec.classBuilder(currentTableName)
+                        .addModifiers(Modifier.PUBLIC)
+                        .superclass(parametrisedDBTableClassName);
 
                 MethodSpec.Builder joinToInnerTableBuilder = MethodSpec.methodBuilder("getJoinToInnerTable")
                         .addParameter(wildcardDBTableParameter)
                         .returns(TypeName.get(String.class))
                         .addModifiers(Modifier.PROTECTED);
 
-                List<MethodSpec> idMethods = getIdMethods();
-                List<MethodSpec> selectMethods = goThroughFields(joinToInnerTableBuilder);
+                getConstructors(builder);
+                getIdMethods(builder);
 
-                MethodSpec joinToInnerTable = joinToInnerTableBuilder.addStatement("return \"\"")
-                        .build();
+                for (Element field : currentElement.getEnclosedElements()) {
+                    getFieldRelated(joinToInnerTableBuilder, field, builder);
+                }
 
-                TypeSpec typeSpec = TypeSpec.classBuilder(currentTableName)
-                        .addModifiers(Modifier.PUBLIC)
-                        .superclass(parametrisedDBTableClassName)
-                        .addMethod(constructor)
-                        .addMethods(idMethods)
-                        .addMethods(selectMethods)
-                        .addMethod(joinToInnerTable)
-                        .build();
+                builder.addMethod(joinToInnerTableBuilder.addStatement("return \"\"").build());
 
-                JavaFile.builder(PACKAGE_NAME, typeSpec)
+                JavaFile.builder(PACKAGE_NAME, builder.build())
                         .build().writeTo(processingEnv.getFiler());
 
             } catch (IOException e) {
@@ -101,14 +100,15 @@ public class DBTableProcessor extends AbstractProcessor {
         return true;
     }
 
-    private MethodSpec getConstructors() {
-        return MethodSpec.constructorBuilder()
+    private void getConstructors(TypeSpec.Builder builder) {
+
+        builder.addMethod(MethodSpec.constructorBuilder()
                 .addModifiers(Modifier.PUBLIC)
                 .addStatement("super($S, $L.class)", currentTableName, currentElement.getSimpleName())
-                .build();
+                .build());
     }
 
-    private List<MethodSpec> getIdMethods() {
+    private void getIdMethods(TypeSpec.Builder builder) {
         List<MethodSpec> idMethods = new ArrayList<>();
         idMethods.add(MethodSpec.methodBuilder("selectId")
                 .returns(parametrisedDBTableClassName)
@@ -123,46 +123,69 @@ public class DBTableProcessor extends AbstractProcessor {
                 .addStatement("return $S", currentIdElement == null ? "oui" : currentIdElement.getSimpleName())
                 .build());
 
-        return idMethods;
+
+        builder.addMethods(idMethods);
     }
 
-    private List<MethodSpec> goThroughFields(MethodSpec.Builder joinToInnerTableBuilder) {
+    private void getFieldRelated(MethodSpec.Builder joinToInnerTableBuilder, Element field, TypeSpec.Builder builder) {
         List<MethodSpec> fieldsMethods = new ArrayList<>();
-
-        for (Element field : currentElement.getEnclosedElements()) {
-            if (field != currentIdElement && field.getKind().equals(ElementKind.FIELD)) {
-                if (currentAnnotation.isGeneratingSelect()) {
-                    MethodSpec method = getSelectMethod(field);
-                    fieldsMethods.add(method);
-                }
-                if (currentAnnotation.isGeneratingWrite()) {
-                    MethodSpec method = getWriteMethod(field);
-                    if (method != null) {
+        if (field.getKind().equals(ElementKind.FIELD)) {
+            if (field.getAnnotation(JoIgnore.class) == null) {
+                if (field != currentIdElement) {
+                    if (currentAnnotation.isGeneratingSelect()) {
+                        MethodSpec method = getSelectMethod(field);
                         fieldsMethods.add(method);
                     }
-                }
-                if (field.asType().getKind() == TypeKind.DECLARED) {
-                    DeclaredType declaredType = (DeclaredType) field.asType();
-                    TypeElement typeElement = (TypeElement) declaredType.asElement();
-                    if (typeElement.getAnnotation(JoTable.class) != null) { // todo verify superclass
-                        Name fieldName = declaredType.asElement().getSimpleName();
-                        ClassName fieldTableClassName = ClassName.bestGuess(fieldName + "Table");
-                        joinToInnerTableBuilder.beginControlFlow("if (innerTable instanceof $T)", fieldTableClassName)
-                                .addStatement("return getJoinOnRef(innerTable, $S, false)", fieldName + "_id")
-                                .endControlFlow();
+                    if (currentAnnotation.isGeneratingWrite()) {
+                        MethodSpec method = getWriteMethod(field);
+                        if (method != null) {
+                            fieldsMethods.add(method);
+                        }
                     }
+                }
+                getColumnNameField(field, builder);
+            }
+            if (field.asType().getKind() == TypeKind.DECLARED) {
+                DeclaredType declaredType = (DeclaredType) field.asType();
+                TypeElement typeElement = (TypeElement) declaredType.asElement();
+                if (typeElement.getAnnotation(JoTable.class) != null) { // todo verify superclass
+                    Name fieldName = declaredType.asElement().getSimpleName();
+                    ClassName fieldTableClassName = ClassName.bestGuess(fieldName + "Table");
+                    joinToInnerTableBuilder.beginControlFlow("if (innerTable instanceof $T)", fieldTableClassName)
+                            .addStatement("return getJoinOnRef(innerTable, $S, false)", fieldName + "_id")
+                            .endControlFlow();
                 }
             }
         }
-        return fieldsMethods;
+        builder.addMethods(fieldsMethods);
+    }
+
+    private void getColumnNameField(Element selectable, TypeSpec.Builder builder) {
+        String dataFieldName = String.valueOf(selectable.getSimpleName());
+        String columnFieldName = dataFieldName;
+        for (int i = dataFieldName.length() - 1; i >= 0 ; i--) {
+            if (Character.isUpperCase(dataFieldName.charAt(i))) {
+                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
+            }
+        }
+        builder.addField(FieldSpec
+                .builder(TypeName.get(String.class), "COLUMN_" + columnFieldName.toUpperCase(), Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+                .initializer("$S", dataFieldName)
+                .build());
     }
 
     private MethodSpec getSelectMethod(Element selectable) {
         String typeName;
         String statementFormat = "select$L($S)";
         TypeMirror typeMirror = selectable.asType();
-        String selectableSimpleName = selectable.getSimpleName().toString();
-        selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
+        String selectableSimpleName;
+        JoField annotationForField = selectable.getAnnotation(JoField.class);
+        if (annotationForField != null) {
+            selectableSimpleName = annotationForField.getName();
+        } else {
+            selectableSimpleName = selectable.getSimpleName().toString();
+            selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
+        }
         MethodSpec.Builder builder = MethodSpec.methodBuilder("select" + selectableSimpleName);
 
         switch (typeMirror.getKind()) {
@@ -196,7 +219,18 @@ public class DBTableProcessor extends AbstractProcessor {
             case DECLARED:
                 DeclaredType declaredType = (DeclaredType) typeMirror;
                 TypeElement typeElement = (TypeElement) declaredType.asElement();
-                if (typeElement.getAnnotation(JoTable.class) != null) {
+                TypeElement superTypeElement = typeElement;
+
+                while (superTypeElement.getAnnotation(JoTable.class) == null) {
+                    TypeMirror superclass = superTypeElement.getSuperclass();
+                    if (superclass instanceof DeclaredType) {
+                        superTypeElement = (TypeElement) ((DeclaredType) superclass).asElement();
+                    } else {
+                        break;
+                    }
+                }
+
+                if (superTypeElement.getAnnotation(JoTable.class) != null) {
                     statementFormat = "select$L($L)";
                     ClassName className = ClassName.get(PACKAGE_NAME, typeElement.getSimpleName() + "Table");
                     typeName = "Table";
