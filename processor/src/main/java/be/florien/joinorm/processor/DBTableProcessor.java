@@ -26,6 +26,7 @@ import javax.lang.model.element.Modifier;
 import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.MirroredTypeException;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 
@@ -45,6 +46,8 @@ public class DBTableProcessor extends AbstractProcessor {
     private Element currentElement;
     private Element currentIdElement;
     private JoTable currentAnnotation;
+    private int debugCount = 0;
+    private TypeSpec.Builder classBuilder;
 
     @Override
     public boolean process(Set<? extends TypeElement> set, RoundEnvironment roundEnvironment) {
@@ -72,7 +75,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 ParameterSpec wildcardDBTableParameter = ParameterSpec.builder(wildcardDBTableClassName, "innerTable").build();
                 currentTableName = classElement.getSimpleName() + "Table";
 
-                TypeSpec.Builder builder = TypeSpec.classBuilder(currentTableName)
+                classBuilder = TypeSpec.classBuilder(currentTableName)
                         .addModifiers(Modifier.PUBLIC)
                         .superclass(parametrisedDBTableClassName);
 
@@ -81,16 +84,16 @@ public class DBTableProcessor extends AbstractProcessor {
                         .returns(TypeName.get(String.class))
                         .addModifiers(Modifier.PROTECTED);
 
-                getConstructors(builder);
-                getIdMethods(builder);
+                getConstructors();
+                getIdMethods();
 
                 for (Element field : currentElement.getEnclosedElements()) {
-                    getFieldRelated(joinToInnerTableBuilder, field, builder);
+                    getFieldRelated(joinToInnerTableBuilder, field, classBuilder);
                 }
 
-                builder.addMethod(joinToInnerTableBuilder.addStatement("return \"\"").build());
+                classBuilder.addMethod(joinToInnerTableBuilder.addStatement("return \"\"").build());
 
-                JavaFile.builder(PACKAGE_NAME, builder.build())
+                JavaFile.builder(PACKAGE_NAME, classBuilder.build())
                         .build().writeTo(processingEnv.getFiler());
 
             } catch (IOException e) {
@@ -100,15 +103,16 @@ public class DBTableProcessor extends AbstractProcessor {
         return true;
     }
 
-    private void getConstructors(TypeSpec.Builder builder) {
+    private void getConstructors() {
+        String dbName = currentAnnotation.tableName().equals(JoTable.STRING_IGNORE) ? currentTableName : currentAnnotation.tableName();
 
-        builder.addMethod(MethodSpec.constructorBuilder()
+        classBuilder.addMethod(MethodSpec.constructorBuilder()
                 .addModifiers(Modifier.PUBLIC)
-                .addStatement("super($S, $L.class)", currentTableName, currentElement.getSimpleName())
+                .addStatement("super($S, $L.class)", dbName, currentElement.getSimpleName())
                 .build());
     }
 
-    private void getIdMethods(TypeSpec.Builder builder) {
+    private void getIdMethods() {
         List<MethodSpec> idMethods = new ArrayList<>();
         idMethods.add(MethodSpec.methodBuilder("selectId")
                 .returns(parametrisedDBTableClassName)
@@ -124,7 +128,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 .build());
 
 
-        builder.addMethods(idMethods);
+        classBuilder.addMethods(idMethods);
     }
 
     private void getFieldRelated(MethodSpec.Builder joinToInnerTableBuilder, Element field, TypeSpec.Builder builder) {
@@ -143,7 +147,7 @@ public class DBTableProcessor extends AbstractProcessor {
                         }
                     }
                 }
-                getColumnNameField(field, builder);
+                getColumnNameField(field, classBuilder);
             }
             if (field.asType().getKind() == TypeKind.DECLARED) {
                 DeclaredType declaredType = (DeclaredType) field.asType();
@@ -157,17 +161,12 @@ public class DBTableProcessor extends AbstractProcessor {
                 }
             }
         }
-        builder.addMethods(fieldsMethods);
+        classBuilder.addMethods(fieldsMethods);
     }
 
     private void getColumnNameField(Element selectable, TypeSpec.Builder builder) {
         String dataFieldName = String.valueOf(selectable.getSimpleName());
-        String columnFieldName = dataFieldName;
-        for (int i = dataFieldName.length() - 1; i >= 0 ; i--) {
-            if (Character.isUpperCase(dataFieldName.charAt(i))) {
-                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
-            }
-        }
+        String columnFieldName = camelToSnake(dataFieldName);
         builder.addField(FieldSpec
                 .builder(TypeName.get(String.class), "COLUMN_" + columnFieldName.toUpperCase(), Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
                 .initializer("$S", dataFieldName)
@@ -178,15 +177,9 @@ public class DBTableProcessor extends AbstractProcessor {
         String typeName;
         String statementFormat = "select$L($S)";
         TypeMirror typeMirror = selectable.asType();
-        String selectableSimpleName;
-        JoField annotationForField = selectable.getAnnotation(JoField.class);
-        if (annotationForField != null) {
-            selectableSimpleName = annotationForField.getName();
-        } else {
-            selectableSimpleName = selectable.getSimpleName().toString();
-            selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
-        }
-        MethodSpec.Builder builder = MethodSpec.methodBuilder("select" + selectableSimpleName);
+        String parameterName = snakeToCamel(selectable.getSimpleName().toString());
+        String selectMethodName = "select" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1);
+        MethodSpec.Builder builder = MethodSpec.methodBuilder(selectMethodName);
 
         switch (typeMirror.getKind()) {
             case BOOLEAN:
@@ -220,6 +213,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 DeclaredType declaredType = (DeclaredType) typeMirror;
                 TypeElement typeElement = (TypeElement) declaredType.asElement();
                 TypeElement superTypeElement = typeElement;
+                JoField annotation = selectable.getAnnotation(JoField.class);
 
                 while (superTypeElement.getAnnotation(JoTable.class) == null) {
                     TypeMirror superclass = superTypeElement.getSuperclass();
@@ -230,11 +224,16 @@ public class DBTableProcessor extends AbstractProcessor {
                     }
                 }
 
-                if (superTypeElement.getAnnotation(JoTable.class) != null) {
+                if (superTypeElement.getAnnotation(JoTable.class) != null || (annotation != null && annotation.getTableClass() != DBTable.class)) {
                     statementFormat = "select$L($L)";
-                    ClassName className = ClassName.get(PACKAGE_NAME, typeElement.getSimpleName() + "Table");
+                    TypeName className;
+                    if (annotation != null && !ClassName.get(getTableClass(annotation)).equals(ClassName.get(DBTable.class))) {
+                        className = ClassName.get(getTableClass(annotation));
+                    } else {
+                        className = ClassName.get(PACKAGE_NAME, typeElement.getSimpleName() + "Table");
+                    }
                     typeName = "Table";
-                    builder.addParameter(ParameterSpec.builder(className, String.valueOf(selectable.getSimpleName())).build());
+                    builder.addParameter(ParameterSpec.builder(className, parameterName).build());
                 } else {
                     typeName = "" + typeElement.getSimpleName();
                 }
@@ -246,9 +245,18 @@ public class DBTableProcessor extends AbstractProcessor {
 
         return builder.returns(parametrisedDBTableClassName)
                 .addModifiers(Modifier.PUBLIC)
-                .addStatement(statementFormat, typeName, selectable.getSimpleName())
+                .addStatement(statementFormat, typeName, parameterName)
                 .addStatement("return this")
                 .build();
+    }
+
+    private TypeMirror getTableClass(JoField annotation) {
+        try {
+            annotation.getTableClass();
+        } catch (MirroredTypeException e) {
+            return e.getTypeMirror();
+        }
+        return null;
     }
 
     private MethodSpec getWriteMethod(Element selectable) {
@@ -305,6 +313,37 @@ public class DBTableProcessor extends AbstractProcessor {
                 .addModifiers(Modifier.PUBLIC)
                 .addParameter(value)
                 .addStatement("write$L($S, $L)", typeName, selectable.getSimpleName(), "value")
+                .build();
+    }
+
+    private String snakeToCamel(String dataFieldName) {
+        String columnFieldName = dataFieldName;
+
+        for (int i = dataFieldName.length() - 1; i >= 0 ; i--) {
+            if (dataFieldName.charAt(i) == '_') {
+                columnFieldName = dataFieldName.substring(0, i) + columnFieldName.substring(i+1, i+2).toUpperCase()+ columnFieldName.substring(i+2, columnFieldName.length());
+            }
+        }
+
+        return columnFieldName;
+    }
+
+    private String camelToSnake(String dataFieldName) {
+        String columnFieldName = dataFieldName;
+
+        for (int i = dataFieldName.length() - 1; i >= 0 ; i--) {
+            if (Character.isUpperCase(dataFieldName.charAt(i))) {
+                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
+            }
+        }
+
+        return columnFieldName;
+    }
+
+    private MethodSpec getDebugMethod(String toDisplay) {
+        return MethodSpec.methodBuilder("debug" + debugCount++)
+                .returns(TypeName.get(String.class))
+                .addStatement("return $S", toDisplay)
                 .build();
     }
 }

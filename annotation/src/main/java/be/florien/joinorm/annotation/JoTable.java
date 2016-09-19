@@ -10,6 +10,9 @@ import java.lang.annotation.Target;
 @Target(value = ElementType.TYPE)
 public @interface JoTable {
 
+    String STRING_IGNORE = "#ignore";
+
     boolean isGeneratingWrite() default true;
     boolean isGeneratingSelect() default true;
+    String tableName() default STRING_IGNORE;
 }
