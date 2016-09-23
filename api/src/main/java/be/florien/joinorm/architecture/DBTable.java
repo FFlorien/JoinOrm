@@ -49,23 +49,24 @@ public abstract class DBTable<T> extends DBData<T> {
      * FIELDS
      */
 
-    private List<DBTable<?>> mDBTableQueryList = new ArrayList<DBTable<?>>();
-    private List<DBPrimitiveField<?>> mDBPrimitiveQueryList = new ArrayList<DBPrimitiveField<?>>();
-    private List<String> mDeleteIdsList = new ArrayList<String>();
-    private List<String> mDBTableNameWriteList = new ArrayList<String>();
-    private List<String> mDBTableValueRefWriteList = new ArrayList<String>();
-    private List<DBTable<?>> mDBTableWriteList = new ArrayList<DBTable<?>>();
-    private List<DBPrimitiveField<?>> mDBPrimitiveWriteList = new ArrayList<DBPrimitiveField<?>>();
-    private List<WhereStatement> mWhereSet = new ArrayList<WhereStatement>();
+    private List<DBTable<?>> mDBTableQueryList = new ArrayList<>();
+    private List<DBPrimitiveField<?>> mDBPrimitiveQueryList = new ArrayList<>();
+    private List<String> mDeleteIdsList = new ArrayList<>();
+    private List<String> mDBTableNameWriteList = new ArrayList<>();
+    private List<String> mDBTableValueRefWriteList = new ArrayList<>();
+    private List<DBTable<?>> mDBTableWriteList = new ArrayList<>();
+    private List<DBPrimitiveField<?>> mDBPrimitiveWriteList = new ArrayList<>();
+    private List<WhereStatement> mWhereSet = new ArrayList<>();
     private final String mTableName;
     protected final Class<T> mClass;
 
+    //todo getId return a list of id, and the rest is responsible to get it right ?
     private boolean mIsDualId;
     private int mInitRowPosition;
     private int mRedundantRows;
 
     private int mNumberOfColumnQueried = -1;
-    private List<T> mResultList = new ArrayList<T>();
+    private List<T> mResultList = new ArrayList<>();
     private int mLastId1 = -100;
     private int mLastId2 = -100;
     private boolean mIsANewObject = true;
@@ -89,9 +90,7 @@ public abstract class DBTable<T> extends DBData<T> {
         mClass = myClass;
         try {
             mObjectToWrite = mClass.newInstance();
-        } catch (InstantiationException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         reset();
@@ -226,7 +225,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return A list of DBDelete
      */
     public List<DBDelete> getDelete() {
-        List<DBDelete> deletes = new ArrayList<DBDelete>();
+        List<DBDelete> deletes = new ArrayList<>();
         for (String id : mDeleteIdsList) {
             deletes.add(new DBDelete(mDataName, mDataName + "." + getId(), id));
         }
@@ -243,20 +242,16 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param columnName Name of the column corresponding to the value
      * @param value The value for the object at corresponding columnName
      */
+    @SuppressWarnings("unused")
     protected void writeString(String columnName, String value) {
         StringField stringField = new StringField(columnName);
         mDBPrimitiveWriteList.remove(stringField);
         mDBPrimitiveWriteList.add(stringField);
         try {
             getFieldToSet(columnName).set(mObjectToWrite, value);
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
-
     }
 
     /**
@@ -264,6 +259,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * 
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void writeNull(String columnName) {
         NullField nullField = new NullField(columnName);
         mDBPrimitiveWriteList.remove(nullField);
@@ -275,17 +271,14 @@ public abstract class DBTable<T> extends DBData<T> {
      * 
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void writeBoolean(String columnName, boolean bool) {
         BooleanField boolField = new BooleanField(columnName);
         mDBPrimitiveWriteList.remove(boolField);
         mDBPrimitiveWriteList.add(boolField);
         try {
             getFieldToSet(columnName).set(mObjectToWrite, bool);
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -295,17 +288,14 @@ public abstract class DBTable<T> extends DBData<T> {
      * 
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void writeInt(String columnName, int integer) {
         IntField intField = new IntField(columnName);
         mDBPrimitiveWriteList.remove(intField);
         mDBPrimitiveWriteList.add(intField);
         try {
             getFieldToSet(columnName).set(mObjectToWrite, integer);
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -315,17 +305,14 @@ public abstract class DBTable<T> extends DBData<T> {
      * 
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void writeDouble(String columnName, double doubleValue) {
         DoubleField doubleField = new DoubleField(columnName);
         mDBPrimitiveWriteList.remove(doubleField);
         mDBPrimitiveWriteList.add(doubleField);
         try {
             getFieldToSet(columnName).set(mObjectToWrite, doubleValue);
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
     }
@@ -335,6 +322,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * 
      * @param tableField A representation of the table to query.
      */
+    @SuppressWarnings("unused")
     protected void writeTable(DBTable<?> tableField, String tableRef, String tableRefValue, Object pojoToAssign) {
         mDBTableWriteList.remove(tableField);
         mDBTableWriteList.add(tableField);
@@ -344,11 +332,7 @@ public abstract class DBTable<T> extends DBData<T> {
         mDBTableValueRefWriteList.add(tableRefValue);
         try {
             getFieldToSet(tableField).set(mObjectToWrite, pojoToAssign);
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
 
@@ -381,11 +365,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 }
             }
             values.add(new DBWrite(mDataName, value));
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (NoSuchFieldException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return referenceId;
@@ -409,7 +389,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     @Override
     protected List<String> buildProjection(String tableName) {
-        List<String> projection = new ArrayList<String>();
+        List<String> projection = new ArrayList<>();
         for (DBData<?> fieldToSelect : mDBPrimitiveQueryList) {
             projection.addAll(fieldToSelect.buildProjection(mDataName));
         }
@@ -597,7 +577,7 @@ public abstract class DBTable<T> extends DBData<T> {
         if (!cursor.isAfterLast()) {
             initId(cursor, 0);
         } else {
-            return new ArrayList<T>();
+            return new ArrayList<>();
         }
         while (!cursor.isAfterLast()) {
             if (compareIDs(cursor, 0)) {
@@ -679,19 +659,14 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return The Field to be set
      * @throws NoSuchFieldException
      */
-    protected Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        Field field = mClass.getField(fieldToSet);
-        return field;
+    private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
+        return mClass.getField(fieldToSet);
     }
 
     private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
         Field field = getFieldToSet(dbFieldToExtract);
         Type genericType = field.getGenericType();
-        if (genericType instanceof ParameterizedType) {
-            return true;
-        } else {
-            return false;
-        }
+        return genericType instanceof ParameterizedType;
     }
 
     @Override
@@ -742,11 +717,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 }
                 currentColumn += tableToExtract.getNumberOfColumnsQueried();
             }
-        } catch (IllegalAccessException ex) {
-            throw new DBArchitectureException(ex);
-        } catch (IllegalArgumentException ex) {
-            throw new DBArchitectureException(ex);
-        } catch (NoSuchFieldException ex) {
+        } catch (Exception ex) {
             throw new DBArchitectureException(ex);
         }
     }
@@ -765,11 +736,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 tableToExtract.reset();
                 tableToExtract.resetList();
             }
-        } catch (IllegalAccessException ex) {
-            throw new DBArchitectureException(ex);
-        } catch (IllegalArgumentException ex) {
-            throw new DBArchitectureException(ex);
-        } catch (NoSuchFieldException ex) {
+        } catch (Exception ex) {
             throw new DBArchitectureException(ex);
         }
     }
@@ -784,7 +751,7 @@ public abstract class DBTable<T> extends DBData<T> {
         } else {
             mRedundantRows = 0;
             for (DBTable<?> table : mDBTableQueryList) {
-                table.setIsGonnaBeRedundant(isRedundant, cursorPosition);
+                table.setIsGonnaBeRedundant(false, cursorPosition);
             }
         }
     }
@@ -802,15 +769,13 @@ public abstract class DBTable<T> extends DBData<T> {
             mLastId2 = -100;
             mIsANewObject = true;
             mIsSubTableFinished = false;
-        } catch (InstantiationException e) {
-            throw new DBArchitectureException(e);
-        } catch (IllegalAccessException e) {
+        } catch (Exception e) {
             throw new DBArchitectureException(e);
         }
     }
 
     private void resetList() {
-        mResultList = new ArrayList<T>();
+        mResultList = new ArrayList<>();
         mInitRowPosition = -1;
     }
 
