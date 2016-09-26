@@ -5,6 +5,8 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
+import be.florien.joinorm.architecture.DBTable;
+
 /**
  * Created by FlamentF on 19-09-16.
  */
@@ -13,4 +15,5 @@ import java.lang.annotation.Target;
 public @interface JoCustomJoin {
 
     String getParams();
+    Class<? extends DBTable> getTableFor() default DBTable.class;
 }

@@ -61,6 +61,7 @@ public abstract class DBTable<T> extends DBData<T> {
     protected final Class<T> mClass;
 
     //todo getId return a list of id, and the rest is responsible to get it right ?
+    //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private boolean mIsDualId;
     private int mInitRowPosition;
     private int mRedundantRows;

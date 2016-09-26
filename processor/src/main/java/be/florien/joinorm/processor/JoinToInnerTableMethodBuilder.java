@@ -40,45 +40,15 @@ class JoinToInnerTableMethodBuilder {
     void buildGetJoin(Element fieldElement) {
         JoJoin joinAnnotation = fieldElement.getAnnotation(JoJoin.class);
 
-
-
-
-
-
-
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO  get parametrised type for list and such !!!!!!!
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-        //TODO
-
-
-
-
-
-
-
-
-
         if (joinAnnotation != null) {
-            DeclaredType customTableClassType = (DeclaredType) getTableClass(joinAnnotation);
             if (isJoinCustomClassDefined(joinAnnotation)) {
+                DeclaredType customTableClassType = (DeclaredType) getTableClass(joinAnnotation);
                 TypeElement customTableClassElement = (TypeElement) customTableClassType.asElement();
 
                 for (Element customTableClassEnclosedElement : customTableClassElement.getEnclosedElements()) {
                     JoCustomJoin customJoinAnnotation = customTableClassEnclosedElement.getAnnotation(JoCustomJoin.class);
                     if (customTableClassEnclosedElement.getKind() == ElementKind.METHOD && customJoinAnnotation != null) {
-                        newConditionForJoin((ClassName) ClassName.get(customTableClassType));
+                        newConditionForJoin(ClassName.get(customTableClassType));
                         currentJoinBuilder.addStatement("return (($L) $L).$L($L)",
                                 customTableClassElement.getSimpleName(),
                                 "innerTable",
@@ -87,10 +57,13 @@ class JoinToInnerTableMethodBuilder {
                     }
                 }
             } else {
-                newConditionForJoin(ClassName.get(packageName, ((DeclaredType)fieldElement.asType()).asElement().getSimpleName() + "Table"));
-                currentJoinBuilder.addStatement("return getJoinOn$L(innerTable, $S, $L)",
-                        joinAnnotation.isReferenceJoin() ? "Ref" : "Id", joinAnnotation.getTableRef(),
-                        joinAnnotation.isLeftJoin());
+                TypeName className = ProcessingUtil.getDBTableTypeName(fieldElement, packageName);
+                if (className != null) {
+                    newConditionForJoin(className);
+                    currentJoinBuilder.addStatement("return getJoinOn$L(innerTable, $S, $L)",
+                            joinAnnotation.isReferenceJoin() ? "Ref" : "Id", joinAnnotation.getTableRef(),
+                            joinAnnotation.isLeftJoin());
+                }
             }
         }
     }
@@ -116,7 +89,7 @@ class JoinToInnerTableMethodBuilder {
         return (TypeMirror) ClassName.get(DBTable.class).box();
     }
 
-    private void newConditionForJoin(ClassName customClassName) {
+    private void newConditionForJoin(TypeName customClassName) {
         if (isStartOfJoin) {
             currentJoinBuilder.beginControlFlow("if (innerTable instanceof $T)", customClassName);
             isStartOfJoin = false;

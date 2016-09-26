@@ -13,7 +13,6 @@ import javax.lang.model.element.Modifier;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.MirroredTypeException;
-import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 
 import be.florien.joinorm.annotation.JoJoin;
@@ -58,37 +57,21 @@ class FieldRelatedMethodsBuilder {
     private MethodSpec getSelectMethod(Element fieldElement) {
         String selectTypeName = getTypeName(fieldElement);
         String statementFormat = "select$L($S)";
-        String parameterName = fieldElement.getSimpleName().toString();
+        String parameterName = snakeToCamel(fieldElement.getSimpleName().toString());
         String selectMethodName = "select" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1);
         MethodSpec.Builder builder = MethodSpec.methodBuilder(selectMethodName);
 
         if (selectTypeName.equals("declared")) {
             DeclaredType fieldDeclaredType = (DeclaredType) fieldElement.asType();
             JoJoin fieldJoinAnnotation = fieldElement.getAnnotation(JoJoin.class);
-            TypeElement fieldTypeElement = (TypeElement) fieldDeclaredType.asElement();
             if (ClassName.get(fieldDeclaredType).equals(ClassName.get(String.class))) {
                 selectTypeName = "String";
             } else if (fieldJoinAnnotation != null) {
-                TypeName className = null;
+                TypeName className;
                 if (isJoinCustomClassDefined(fieldJoinAnnotation)) {
                     className = ClassName.get(getTableClass(fieldJoinAnnotation));
                 } else {
-                    DeclaredType parameterDeclaredType = getTypeParameterDeclaredType(fieldDeclaredType);
-                    while (fieldTypeElement.getAnnotation(JoTable.class) == null && (parameterDeclaredType == null || parameterDeclaredType.asElement().getAnnotation(JoTable.class) == null)) {
-                        TypeMirror superclass = fieldTypeElement.getSuperclass();
-                        if (superclass instanceof DeclaredType) {
-                            fieldTypeElement = (TypeElement) ((DeclaredType) superclass).asElement();
-                            parameterDeclaredType = getTypeParameterDeclaredType((DeclaredType) fieldElement.asType());
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if (fieldTypeElement.getAnnotation(JoTable.class) != null) {
-                        className = ClassName.get(tablePackageName, fieldTypeElement.getSimpleName() + "Table");
-                    } else if (parameterDeclaredType != null && parameterDeclaredType.asElement().getAnnotation(JoTable.class) != null) {
-                        className = ClassName.get(tablePackageName, parameterDeclaredType.asElement().getSimpleName() + "Table");
-                    }
+                    className = ProcessingUtil.getDBTableTypeName(fieldElement, tablePackageName);
                 }
 
                 if (className != null) {
@@ -114,18 +97,6 @@ class FieldRelatedMethodsBuilder {
 
     private boolean isJoinCustomClassDefined(JoJoin fieldJoinAnnotation) {
         return !ClassName.get(getTableClass(fieldJoinAnnotation)).equals(ClassName.get(DBTable.class));
-    }
-
-    private DeclaredType getTypeParameterDeclaredType(DeclaredType declaredType) {
-        DeclaredType parameterDeclaredType = null;
-        TypeMirror superParameterType = null;
-        if (declaredType.getTypeArguments().size() == 1) {
-            superParameterType = declaredType.getTypeArguments().get(0);
-        }
-        if (superParameterType != null && superParameterType.getKind() == TypeKind.DECLARED) {
-            parameterDeclaredType = (DeclaredType) superParameterType;
-        }
-        return parameterDeclaredType;
     }
 
     private MethodSpec getWriteMethod(Element selectable) {
