@@ -437,8 +437,6 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected abstract String getJoinToInnerTable(DBTable<?> innerTable);
 
-    // TODO LEFT JOIN as a boolean parameter
-
     /**
      * Construct and return a JOIN statement where innerTable contain a reference to this table ID
      * 

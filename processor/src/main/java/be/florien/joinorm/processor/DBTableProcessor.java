@@ -48,7 +48,7 @@ public class DBTableProcessor extends AbstractProcessor {
     private JoinToInnerTableMethodBuilder joinMethodBuilder;
     private Messager messager;
 
-    //TODO list of Table
+    //TODO supportedAnnotationTypes is it important ????
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnvironment) {

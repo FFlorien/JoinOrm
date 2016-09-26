@@ -107,7 +107,7 @@ class FieldRelatedMethodsBuilder {
             DeclaredType declaredType = (DeclaredType) typeMirror;
             TypeElement typeElement = (TypeElement) declaredType.asElement();
             if (typeElement.getAnnotation(JoTable.class) != null) {
-                return null; //todo
+                return null; //todo use ProcessorUtil to get parameter type
             } else {
                 typeName = "" + typeElement.getSimpleName();
             }
