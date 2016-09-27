@@ -11,11 +11,7 @@ import javax.lang.model.type.TypeMirror;
 
 import be.florien.joinorm.annotation.JoTable;
 
-/**
- * Created by FlamentF on 26-09-16.
- */
-
-public class ProcessingUtil {
+class ProcessingUtil {
 
     static TypeName getDBTableTypeName(Element fieldElement, String tablePackageName) {
         TypeName className = null;
@@ -40,15 +36,20 @@ public class ProcessingUtil {
         return className;
     }
 
-    private static DeclaredType getTypeParameterDeclaredType(DeclaredType declaredType) {
+    static DeclaredType getTypeParameterDeclaredType(DeclaredType declaredType) {
         DeclaredType parameterDeclaredType = null;
-        TypeMirror superParameterType = null;
-        if (declaredType.getTypeArguments().size() == 1) {
-            superParameterType = declaredType.getTypeArguments().get(0);
-        }
-        if (superParameterType != null && superParameterType.getKind() == TypeKind.DECLARED) {
-            parameterDeclaredType = (DeclaredType) superParameterType;
+        TypeMirror parameterType = getParameterType(declaredType);
+        if (parameterType != null && parameterType.getKind() == TypeKind.DECLARED) {
+            parameterDeclaredType = (DeclaredType) parameterType;
         }
         return parameterDeclaredType;
+    }
+
+    static TypeMirror getParameterType(DeclaredType declaredType) {
+        TypeMirror parameterType = null;
+        if (declaredType.getTypeArguments().size() == 1) {
+            parameterType = declaredType.getTypeArguments().get(0);
+        }
+        return parameterType;
     }
 }

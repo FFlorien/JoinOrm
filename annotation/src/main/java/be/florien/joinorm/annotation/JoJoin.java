@@ -12,11 +12,12 @@ import be.florien.joinorm.architecture.DBTable;
 @Target(value = ElementType.FIELD)
 public @interface JoJoin {
 
-    String IGNORE_ID = "#id";
+    String IGNORE = "#ignore";
 
     Class<? extends DBTable> getTableClass() default DBTable.class;
     boolean isReferenceJoin() default false;
     boolean isLeftJoin() default false;
-    String getTableRef() default IGNORE_ID;
+    String getTableRef() default IGNORE; //todo tableref, alias, fieldName : how to handle ?
+    String getAlias() default IGNORE;
 
 }

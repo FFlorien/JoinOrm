@@ -56,7 +56,7 @@ class JoinToInnerTableMethodBuilder {
                                 customJoinAnnotation.getParams());
                     }
                 }
-            } else {
+            } else if (!joinAnnotation.getTableRef().equals(JoJoin.IGNORE)){
                 TypeName className = ProcessingUtil.getDBTableTypeName(fieldElement, packageName);
                 if (className != null) {
                     newConditionForJoin(className);

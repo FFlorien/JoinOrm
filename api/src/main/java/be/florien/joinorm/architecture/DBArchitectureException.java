@@ -7,6 +7,10 @@ public class DBArchitectureException extends RuntimeException {
         super(ex);
     }
 
+    public DBArchitectureException(String message, Exception ex) {
+        super( message, ex);
+    }
+
     // TODO: make a clearer message for each exception
 
     /**

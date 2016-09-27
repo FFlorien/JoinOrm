@@ -736,7 +736,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 tableToExtract.resetList();
             }
         } catch (Exception ex) {
-            throw new DBArchitectureException(ex);
+            throw new DBArchitectureException("Exception caught during the parsing of table " + mTableName + "(alias : " + mDataName + ")", ex);
         }
     }
 

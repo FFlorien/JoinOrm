@@ -1,7 +1,6 @@
 package be.florien.joinorm.processor;
 
 import com.squareup.javapoet.ClassName;
-import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.JavaFile;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterizedTypeName;
@@ -27,7 +26,6 @@ import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.TypeKind;
 import javax.tools.Diagnostic;
 
-import be.florien.joinorm.annotation.JoId;
 import be.florien.joinorm.annotation.JoIgnore;
 import be.florien.joinorm.annotation.JoTable;
 import be.florien.joinorm.architecture.DBTable;
@@ -39,16 +37,16 @@ public class DBTableProcessor extends AbstractProcessor {
     private int debugCount = 0;
     private String currentTableName;
     private Element currentModelElement;
-    private List<Element> currentIdElements;
     private String currentTablePackageName;
     private ClassName currentTableClassName;
     private JoTable currentModelAnnotation;
     private TypeSpec.Builder currentClassBuilder;
-    private FieldRelatedMethodsBuilder fieldMethodBuilder;
+    private FieldRelatedElementsBuilder fieldElementBuilder;
     private JoinToInnerTableMethodBuilder joinMethodBuilder;
     private Messager messager;
 
     //TODO supportedAnnotationTypes is it important ????
+    //todo error launched at compile time for inconsistent annotation configuration
 
     @Override
     public synchronized void init(ProcessingEnvironment processingEnvironment) {
@@ -70,15 +68,13 @@ public class DBTableProcessor extends AbstractProcessor {
             currentTableClassName = ClassName.get(currentTablePackageName, currentTableName);
 
             initBuilders();
-            getIdElement(roundEnvironment);
             addConstructor();
-            addIdMethods();
 
             for (Element field : currentModelElement.getEnclosedElements()) {
-                addFieldRelatedMethods(field);
+                addFieldRelatedElements(field);
             }
 
-            currentClassBuilder.addMethods(fieldMethodBuilder.getMethods());
+            fieldElementBuilder.addSpecToBuilder(currentClassBuilder);
             currentClassBuilder.addMethod(joinMethodBuilder.getJoinToInnerTableMethod());
 
             try {
@@ -102,7 +98,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 .addModifiers(Modifier.PUBLIC)
                 .superclass(parametrisedDBTableClassName);
 
-        fieldMethodBuilder = new FieldRelatedMethodsBuilder(currentModelAnnotation.isGeneratingSelect(), currentModelAnnotation.isGeneratingWrite(), currentTablePackageName, currentTableClassName);
+        fieldElementBuilder = new FieldRelatedElementsBuilder(currentModelAnnotation.isGeneratingSelect(), currentModelAnnotation.isGeneratingWrite(), currentTablePackageName, currentTableClassName);
         joinMethodBuilder = new JoinToInnerTableMethodBuilder(currentTablePackageName);
 
     }
@@ -116,77 +112,15 @@ public class DBTableProcessor extends AbstractProcessor {
                 .build());
     }
 
-    private void getIdElement(RoundEnvironment roundEnvironment) {
-        currentIdElements = new ArrayList<>();
-        for (Element maybeIdElement : roundEnvironment.getElementsAnnotatedWith(JoId.class)) {
-            if (maybeIdElement.getEnclosingElement().equals(currentModelElement)) {
-                currentIdElements.add(maybeIdElement);
-            }
-        }
-    }
-
-    private void addIdMethods() {
-        List<MethodSpec> idMethods = new ArrayList<>();
-        MethodSpec.Builder selectIdBuilder = MethodSpec.methodBuilder("selectId")
-                .addAnnotation(Override.class)
-                .returns(currentTableClassName)
-                .addModifiers(Modifier.PUBLIC);
-
-        if (currentIdElements.size() == 1) {
-            selectIdBuilder.addStatement("selectId($S)", currentIdElements.get(0).getSimpleName());
-        } else if (currentIdElements.size() == 2) {
-            selectIdBuilder.addStatement("selectId($S, $S)", currentIdElements.get(0).getSimpleName(), currentIdElements.get(1).getSimpleName());
-        } else {
-            return;
-        }
-
-        idMethods.add(selectIdBuilder.addStatement("return this")
-                .build());
-
-        idMethods.add(MethodSpec.methodBuilder("getId")
-                .returns(String.class)
-                .addAnnotation(Override.class)
-                .addModifiers(Modifier.PUBLIC)
-                .addStatement("return $S", currentIdElements.get(0).getSimpleName()) //todo change here for when dual id is correctly implemented (triple id ? quadruple id ??? <not defined number> id ??!??!?)
-                .build());
-
-
-        currentClassBuilder.addMethods(idMethods);
-    }
-
-    private void addFieldRelatedMethods(Element fieldElement) {
+    private void addFieldRelatedElements(Element fieldElement) {
         List<MethodSpec> fieldMethods = new ArrayList<>();
         if (fieldElement.getKind().equals(ElementKind.FIELD) && fieldElement.getAnnotation(JoIgnore.class) == null) {
-            if (!currentIdElements.contains(fieldElement)) {
-                fieldMethodBuilder.addFieldRelatedMethods(fieldElement);
-            }
-            addColumnField(fieldElement);
+            fieldElementBuilder.addFieldRelatedElements(fieldElement);
             if (fieldElement.asType().getKind() == TypeKind.DECLARED) {
                 joinMethodBuilder.buildGetJoin(fieldElement);
             }
         }
         currentClassBuilder.addMethods(fieldMethods);
-    }
-
-    private void addColumnField(Element fieldElement) {
-        String columnFieldValue = String.valueOf(fieldElement.getSimpleName());
-        String columnFieldName = "COLUMN_" + camelToSnake(columnFieldValue).toUpperCase();
-        currentClassBuilder.addField(
-                FieldSpec.builder(TypeName.get(String.class), columnFieldName, Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
-                        .initializer("$S", columnFieldValue)
-                        .build());
-    }
-
-    private String camelToSnake(String dataFieldName) {
-        String columnFieldName = dataFieldName;
-
-        for (int i = dataFieldName.length() - 1; i >= 0; i--) {
-            if (Character.isUpperCase(dataFieldName.charAt(i))) {
-                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
-            }
-        }
-
-        return columnFieldName;
     }
 
     @SuppressWarnings("unused")
