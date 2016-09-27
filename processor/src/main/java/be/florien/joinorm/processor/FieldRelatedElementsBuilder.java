@@ -21,6 +21,12 @@ import be.florien.joinorm.annotation.JoJoin;
 import be.florien.joinorm.architecture.DBTable;
 
 class FieldRelatedElementsBuilder {
+    /**
+     * Fields
+     */
+
+    private static final String DECLARED_TYPE_NAME = "declared";
+    private static final String ERROR_TYPE = "error_type";
 
     private boolean isGeneratingSelect;
     private boolean isGeneratingWrite;
@@ -28,6 +34,10 @@ class FieldRelatedElementsBuilder {
     private TypeName tableClassName;
     private List<MethodSpec> methods;
     private List<FieldSpec> fields;
+
+    /**
+     * Constructor
+     */
 
     FieldRelatedElementsBuilder(boolean isGeneratingSelect, boolean isGeneratingWrite, String tablePackageName, TypeName tableClassName) {
         this.isGeneratingSelect = isGeneratingSelect;
@@ -38,17 +48,14 @@ class FieldRelatedElementsBuilder {
         this.fields = new ArrayList<>();
     }
 
-    void addFieldRelatedElements(Element fieldElement) {
-        MethodSpec selectMethod = null;
-        MethodSpec writeMethod = null;
-        boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
+    /**
+     * Accessible methods
+     */
 
-        if (isGeneratingSelect) {
-            selectMethod = getSelectMethod(fieldElement, isId);
-            if (selectMethod != null) {
-                methods.add(selectMethod);
-            }
-        }
+    void addFieldRelatedElements(Element fieldElement) {
+        TypeMirror typeMirror = fieldElement.asType();
+        MethodSpec.Builder selectBuilder;
+        boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
 
         if (isId) {
             methods.add(MethodSpec.methodBuilder("getId")
@@ -59,15 +66,90 @@ class FieldRelatedElementsBuilder {
                     .build());
         }
 
-        if (isGeneratingWrite) {
-            writeMethod = getWriteMethod(fieldElement);
-            if (writeMethod != null) {
-                methods.add(writeMethod);
+        String dbTypeName = getTypeName(typeMirror);
+        String selectStatementFormat = "select$L($S)";
+        String parameterName = fieldElement.getSimpleName().toString();
+        String selectMethodName = snakeToCamel(parameterName);
+
+        if (isId) {
+            dbTypeName = "Id";
+            selectBuilder = MethodSpec.methodBuilder("selectId");
+            selectBuilder.addAnnotation(Override.class);
+        } else {
+            selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
+            selectBuilder = MethodSpec.methodBuilder(selectMethodName);
+
+        }
+
+        if (dbTypeName.equals(DECLARED_TYPE_NAME)) {
+            DeclaredType fieldDeclaredType = (DeclaredType) fieldElement.asType();
+            DeclaredType fieldParameterDeclaredType = ProcessingUtil.getTypeParameterDeclaredType(fieldDeclaredType);
+            JoJoin fieldJoinAnnotation = fieldElement.getAnnotation(JoJoin.class);
+
+            if (ClassName.get(fieldDeclaredType).equals(ClassName.get(String.class)) ||
+                    (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(String.class)))) {
+                dbTypeName = "String";
+            } else if (fieldJoinAnnotation != null) {
+                TypeName className;
+
+                if (isJoinCustomClassDefined(fieldJoinAnnotation)) {
+                    className = ClassName.get(getTableClass(fieldJoinAnnotation));
+                } else {
+                    className = ProcessingUtil.getDBTableTypeName(fieldElement, tablePackageName);
+                }
+
+                if (className != null) {
+                    dbTypeName = "Table";
+                    selectStatementFormat = "select$L($L)";
+                    parameterName = snakeToCamel(parameterName);
+                    selectBuilder.addParameter(ParameterSpec.builder(className, parameterName).build());
+
+                    if (!fieldJoinAnnotation.getAlias().equals(JoJoin.IGNORE)) {
+                        selectBuilder.addStatement("$L.setAlias($S)", parameterName, fieldJoinAnnotation.getAlias());
+                    }
+                } else {
+                    return;
+                }
+            } else {
+                return;
             }
         }
 
-        if ((isGeneratingSelect && selectMethod != null) || (isGeneratingWrite && writeMethod != null)) {
-            fields.add(addColumnField(fieldElement));
+        boolean shouldWriteColumnName = false;
+        ParameterSpec value = ParameterSpec.builder(TypeName.get(typeMirror), "value").build();
+
+        if (isGeneratingWrite && !isId) {
+            methods.add(MethodSpec.methodBuilder("write" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1))
+                    .addModifiers(Modifier.PUBLIC)
+                    .addParameter(value)
+                    .addStatement("write$L($S, $L)", dbTypeName, fieldElement.getSimpleName(), "value")
+                    .build());
+            shouldWriteColumnName = true;
+        }
+
+
+        if (isGeneratingWrite && isId) {
+            methods.add(MethodSpec.methodBuilder("write" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1))
+                    .addModifiers(Modifier.PUBLIC)
+                    .addParameter(value)
+                    .addStatement("write$L($L)", dbTypeName, "value")
+                    .build());
+            shouldWriteColumnName = true;
+        }
+
+
+        if (isGeneratingSelect || isId) {
+            methods.add(selectBuilder.returns(tableClassName)
+                    .addModifiers(Modifier.PUBLIC)
+                    .addStatement(selectStatementFormat, dbTypeName, parameterName)
+                    .addStatement("return this")
+                    .build());
+            shouldWriteColumnName = true;
+        }
+
+
+        if (shouldWriteColumnName) {
+            addColumnField(fieldElement);
         }
     }
 
@@ -76,128 +158,21 @@ class FieldRelatedElementsBuilder {
         classBuilder.addFields(fields);
     }
 
-    private MethodSpec getSelectMethod(Element fieldElement, boolean isId) {
-        String selectTypeName = getTypeName(fieldElement.asType());
-        String statementFormat = "select$L($S)";
-        String parameterName = fieldElement.getSimpleName().toString();
-        String selectMethodName = snakeToCamel(parameterName);
-        MethodSpec.Builder builder;
-        if (isId) {
-            selectTypeName = "Id";
-            builder = MethodSpec.methodBuilder("selectId");
-            builder.addAnnotation(Override.class);
-        } else {
-            selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
-            builder = MethodSpec.methodBuilder(selectMethodName);
+    /**
+     * Get Methods
+     */
 
-        }
-
-        if (selectTypeName.equals("declared")) {
-            DeclaredType fieldDeclaredType = (DeclaredType) fieldElement.asType();
-            DeclaredType typeParameterDeclaredType = ProcessingUtil.getTypeParameterDeclaredType(fieldDeclaredType);
-            if (ClassName.get(fieldDeclaredType).equals(ClassName.get(String.class)) ||
-                    (typeParameterDeclaredType != null &&
-                            ClassName.get(typeParameterDeclaredType).equals(ClassName.get(String.class)))) {
-                selectTypeName = "String";
-            } else {
-                JoJoin fieldJoinAnnotation = fieldElement.getAnnotation(JoJoin.class);
-                TypeMirror parameterType = ProcessingUtil.getParameterType(fieldDeclaredType);
-                String typeName = null;
-                if (parameterType != null) {
-                    typeName = getTypeName(parameterType);
-                }
-                if (typeName != null && !typeName.equals("declared") && !typeName.equals("lolType")) {//todo verify if is Collection
-                    selectTypeName = typeName;
-                } else if (fieldJoinAnnotation != null) {
-                    TypeName className;
-                    if (isJoinCustomClassDefined(fieldJoinAnnotation)) {
-                        className = ClassName.get(getTableClass(fieldJoinAnnotation));
-                    } else {
-                        className = ProcessingUtil.getDBTableTypeName(fieldElement, tablePackageName);
-                    }
-
-                    if (className != null) {
-                        selectTypeName = "Table";
-                        statementFormat = "select$L($L)";
-                        parameterName = snakeToCamel(parameterName);
-                        builder.addParameter(ParameterSpec.builder(className, parameterName).build());
-
-                        if (!fieldJoinAnnotation.getAlias().equals(JoJoin.IGNORE)) {
-                            builder.addStatement("$L.setAlias($S)", parameterName, fieldJoinAnnotation.getAlias());
-                        }
-                    } else {
-                        return null;
-                    }
-                } else {
-                    return null;
-                }
-            }
-        }
-
-        return builder.returns(tableClassName)
-                .addModifiers(Modifier.PUBLIC)
-                .addStatement(statementFormat, selectTypeName, parameterName)
-                .addStatement("return this")
-                .build();
-    }
-
-    private MethodSpec getWriteMethod(Element fieldElement) {
-        String writeTypeName = getTypeName(fieldElement.asType());
-        TypeMirror typeMirror = fieldElement.asType();
-        ParameterSpec value = ParameterSpec.builder(TypeName.get(typeMirror), "value").build();
-
-        if (writeTypeName.equals("declared")) {
-            DeclaredType fieldDeclaredType = (DeclaredType) typeMirror;
-            JoJoin fieldJoinAnnotation = fieldElement.getAnnotation(JoJoin.class);
-            if (ClassName.get(fieldDeclaredType).equals(ClassName.get(String.class))) {
-                writeTypeName = "String";
-            } else if (fieldJoinAnnotation != null) {
-                TypeName className;
-                if (isJoinCustomClassDefined(fieldJoinAnnotation)) {
-                    className = ClassName.get(getTableClass(fieldJoinAnnotation));
-                } else {
-                    className = ProcessingUtil.getDBTableTypeName(fieldElement, tablePackageName);
-                }
-
-                if (className != null) {
-                    writeTypeName = "Table";
-                } else {
-                    return null;
-                }
-            } else {
-                return null;
-            }
-        }
-
-        String selectableSimpleName = fieldElement.getSimpleName().toString();
-        selectableSimpleName = selectableSimpleName.substring(0, 1).toUpperCase() + selectableSimpleName.substring(1);
-
-        return MethodSpec.methodBuilder("write" + selectableSimpleName)
-                .addModifiers(Modifier.PUBLIC)
-                .addParameter(value)
-                .addStatement("write$L($S, $L)", writeTypeName, fieldElement.getSimpleName(), "value")
-                .build();
-    }
-
-    private FieldSpec addColumnField(Element fieldElement) {
+    private void addColumnField(Element fieldElement) {
         String columnFieldValue = String.valueOf(fieldElement.getSimpleName());
         String columnFieldName = "COLUMN_" + camelToSnake(columnFieldValue).toUpperCase();
-        return FieldSpec.builder(TypeName.get(String.class), columnFieldName, Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
+        fields.add(FieldSpec.builder(TypeName.get(String.class), columnFieldName, Modifier.PUBLIC, Modifier.STATIC, Modifier.FINAL)
                 .initializer("$S", columnFieldValue)
-                .build();
+                .build());
     }
 
-    private String camelToSnake(String dataFieldName) {
-        String columnFieldName = dataFieldName;
-
-        for (int i = dataFieldName.length() - 1; i >= 0; i--) {
-            if (Character.isUpperCase(dataFieldName.charAt(i))) {
-                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
-            }
-        }
-
-        return columnFieldName;
-    }
+    /**
+     * Utility methods
+     */
 
     private boolean isJoinCustomClassDefined(JoJoin fieldJoinAnnotation) {
         return !ClassName.get(getTableClass(fieldJoinAnnotation)).equals(ClassName.get(DBTable.class));
@@ -233,11 +208,23 @@ class FieldRelatedElementsBuilder {
             case ARRAY:
                 return "Array";
             case DECLARED:
-                return "declared";
+                return DECLARED_TYPE_NAME;
             default:
-                return "lolType";
+                return ERROR_TYPE;
 
         }
+    }
+
+    private String camelToSnake(String dataFieldName) {
+        String columnFieldName = dataFieldName;
+
+        for (int i = dataFieldName.length() - 1; i >= 0; i--) {
+            if (Character.isUpperCase(dataFieldName.charAt(i))) {
+                columnFieldName = dataFieldName.substring(0, i) + '_' + columnFieldName.substring(i, columnFieldName.length());
+            }
+        }
+
+        return columnFieldName;
     }
 
     private String snakeToCamel(String dataFieldName) {

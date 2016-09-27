@@ -20,9 +20,18 @@ import be.florien.joinorm.annotation.JoJoin;
 import be.florien.joinorm.architecture.DBTable;
 
 class JoinToInnerTableMethodBuilder {
+
+    /**
+     * Fields
+     */
+
     private boolean isStartOfJoin;
     private MethodSpec.Builder currentJoinBuilder;
     private String packageName;
+
+    /**
+     * Constructor
+     */
 
     JoinToInnerTableMethodBuilder(String packageName) {
         this.packageName = packageName;
@@ -36,6 +45,10 @@ class JoinToInnerTableMethodBuilder {
                 .returns(TypeName.get(String.class))
                 .addModifiers(Modifier.PROTECTED);
     }
+
+    /**
+     * Accessible methods
+     */
 
     void buildGetJoin(Element fieldElement) {
         JoJoin joinAnnotation = fieldElement.getAnnotation(JoJoin.class);
@@ -61,7 +74,8 @@ class JoinToInnerTableMethodBuilder {
                 if (className != null) {
                     newConditionForJoin(className);
                     currentJoinBuilder.addStatement("return getJoinOn$L(innerTable, $S, $L)",
-                            joinAnnotation.isReferenceJoin() ? "Ref" : "Id", joinAnnotation.getTableRef(),
+                            joinAnnotation.isReferenceJoin() ? "Ref" : "Id",
+                            joinAnnotation.getTableRef(),
                             joinAnnotation.isLeftJoin());
                 }
             }
@@ -69,12 +83,16 @@ class JoinToInnerTableMethodBuilder {
     }
 
     MethodSpec getJoinToInnerTableMethod() {
-
         if (!isStartOfJoin) {
             currentJoinBuilder.endControlFlow();
         }
+
         return currentJoinBuilder.addStatement("return \"\"").build();
     }
+
+    /**
+     * Utility methods
+     */
 
     private boolean isJoinCustomClassDefined(JoJoin fieldJoinAnnotation) {
         return !ClassName.get(getTableClass(fieldJoinAnnotation)).equals(ClassName.get(DBTable.class));
@@ -86,6 +104,7 @@ class JoinToInnerTableMethodBuilder {
         } catch (MirroredTypeException e) {
             return e.getTypeMirror();
         }
+
         return (TypeMirror) ClassName.get(DBTable.class).box();
     }
 

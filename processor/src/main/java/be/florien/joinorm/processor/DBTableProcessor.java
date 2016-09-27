@@ -48,6 +48,10 @@ public class DBTableProcessor extends AbstractProcessor {
     //TODO supportedAnnotationTypes is it important ????
     //todo error launched at compile time for inconsistent annotation configuration
 
+    /**
+     * Overridden methods
+     */
+
     @Override
     public synchronized void init(ProcessingEnvironment processingEnvironment) {
         super.init(processingEnvironment);
@@ -61,12 +65,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 continue;
             }
 
-            currentModelElement = tableElement;
-            currentTablePackageName = ClassName.get((TypeElement) currentModelElement).packageName() + ".table";
-            currentModelAnnotation = currentModelElement.getAnnotation(JoTable.class);
-            currentTableName = tableElement.getSimpleName() + "Table";
-            currentTableClassName = ClassName.get(currentTablePackageName, currentTableName);
-
+            initCurrentFile(tableElement);
             initBuilders();
             addConstructor();
 
@@ -87,6 +86,18 @@ public class DBTableProcessor extends AbstractProcessor {
             }
         }
         return true;
+    }
+
+    /**
+     * Private methods
+     */
+
+    private void initCurrentFile(Element tableElement) {
+        currentModelElement = tableElement;
+        currentTablePackageName = ClassName.get((TypeElement) currentModelElement).packageName() + ".table";
+        currentModelAnnotation = currentModelElement.getAnnotation(JoTable.class);
+        currentTableName = tableElement.getSimpleName() + "Table";
+        currentTableClassName = ClassName.get(currentTablePackageName, currentTableName);
     }
 
     private void initBuilders() {
@@ -122,6 +133,10 @@ public class DBTableProcessor extends AbstractProcessor {
         }
         currentClassBuilder.addMethods(fieldMethods);
     }
+
+    /**
+     * Debug Method
+     */
 
     @SuppressWarnings("unused")
     private void getDebugMethod(String toDisplay) {
