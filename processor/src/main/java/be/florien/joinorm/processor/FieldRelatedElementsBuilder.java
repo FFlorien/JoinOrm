@@ -10,11 +10,13 @@ import com.squareup.javapoet.TypeSpec;
 import java.util.ArrayList;
 import java.util.List;
 
+import javax.annotation.processing.Messager;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.Modifier;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.MirroredTypeException;
 import javax.lang.model.type.TypeMirror;
+import javax.tools.Diagnostic;
 
 import be.florien.joinorm.annotation.JoId;
 import be.florien.joinorm.annotation.JoJoin;
@@ -32,18 +34,21 @@ class FieldRelatedElementsBuilder {
     private boolean isGeneratingWrite;
     private String tablePackageName;
     private TypeName tableClassName;
+    private Messager messager;
     private List<MethodSpec> methods;
     private List<FieldSpec> fields;
+    private Element fieldElement;
 
     /**
      * Constructor
      */
 
-    FieldRelatedElementsBuilder(boolean isGeneratingSelect, boolean isGeneratingWrite, String tablePackageName, TypeName tableClassName) {
+    FieldRelatedElementsBuilder(boolean isGeneratingSelect, boolean isGeneratingWrite, String tablePackageName, TypeName tableClassName, Messager messager) {
         this.isGeneratingSelect = isGeneratingSelect;
         this.isGeneratingWrite = isGeneratingWrite;
         this.tablePackageName = tablePackageName;
         this.tableClassName = tableClassName;
+        this.messager = messager;
         this.methods = new ArrayList<>();
         this.fields = new ArrayList<>();
     }
@@ -53,6 +58,7 @@ class FieldRelatedElementsBuilder {
      */
 
     void addFieldRelatedElements(Element fieldElement) {
+        this.fieldElement = fieldElement;
         TypeMirror typeMirror = fieldElement.asType();
         MethodSpec.Builder selectBuilder;
         boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
@@ -108,9 +114,11 @@ class FieldRelatedElementsBuilder {
                         selectBuilder.addStatement("$L.setAlias($S)", parameterName, fieldJoinAnnotation.getAlias());
                     }
                 } else {
+                    messager.printMessage(Diagnostic.Kind.ERROR, "Element annotated with JoJoin is not a DBTable", fieldElement);
                     return;
                 }
             } else {
+                messager.printMessage(Diagnostic.Kind.WARNING, "Element class is not comprehensible for the API", fieldElement);
                 return;
             }
         }
@@ -210,6 +218,7 @@ class FieldRelatedElementsBuilder {
             case DECLARED:
                 return DECLARED_TYPE_NAME;
             default:
+                messager.printMessage(Diagnostic.Kind.ERROR, "Cannot determine the type of element", fieldElement);
                 return ERROR_TYPE;
 
         }

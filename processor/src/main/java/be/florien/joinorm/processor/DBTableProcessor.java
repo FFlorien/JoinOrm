@@ -109,7 +109,7 @@ public class DBTableProcessor extends AbstractProcessor {
                 .addModifiers(Modifier.PUBLIC)
                 .superclass(parametrisedDBTableClassName);
 
-        fieldElementBuilder = new FieldRelatedElementsBuilder(currentModelAnnotation.isGeneratingSelect(), currentModelAnnotation.isGeneratingWrite(), currentTablePackageName, currentTableClassName);
+        fieldElementBuilder = new FieldRelatedElementsBuilder(currentModelAnnotation.isGeneratingSelect(), currentModelAnnotation.isGeneratingWrite(), currentTablePackageName, currentTableClassName, messager);
         joinMethodBuilder = new JoinToInnerTableMethodBuilder(currentTablePackageName);
 
     }
