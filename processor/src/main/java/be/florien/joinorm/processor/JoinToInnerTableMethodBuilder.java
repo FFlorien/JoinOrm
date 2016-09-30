@@ -73,10 +73,10 @@ class JoinToInnerTableMethodBuilder {
                 TypeName className = ProcessingUtil.getDBTableTypeName(fieldElement, packageName);
                 if (className != null) {
                     newConditionForJoin(className);
-                    currentJoinBuilder.addStatement("return getJoinOn$L(innerTable, $S, $L)",
+                    currentJoinBuilder.addStatement("return getJoinOn$L(innerTable, $L, $S)",
                             joinAnnotation.isReferenceJoin() ? "Ref" : "Id",
-                            joinAnnotation.getTableRef(),
-                            joinAnnotation.isLeftJoin());
+                            joinAnnotation.isLeftJoin(),
+                            joinAnnotation.getTableRef());
                 }
             }
         }

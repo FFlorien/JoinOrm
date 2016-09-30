@@ -4,6 +4,7 @@ package be.florien.joinorm.architecture;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.text.TextUtils;
+import android.util.Log;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
@@ -30,8 +31,8 @@ import be.florien.joinorm.primitivefield.StringField;
  * <ul>
  * <li>select the fields to be present in the resulting object</li>
  * <li>join the possible tables referenced to this one, preferably using
- * {@link be.florien.joinorm.architecture.DBTable#getJoinOnId(DBTable, String, boolean) getJoinOnId} or
- * {@link be.florien.joinorm.architecture.DBTable#getJoinOnRef(DBTable, String, boolean) getJoinOnRef}</li>
+ * {@link be.florien.joinorm.architecture.DBTable#getJoinOnId(DBTable, boolean, String...) getJoinOnId} or
+ * {@link be.florien.joinorm.architecture.DBTable#getJoinOnRef(DBTable, boolean, String...) getJoinOnRef}</li>
  * </ul>
  * <strong>PLEASE BE CAREFUL</strong> The POJO T, result of the conversion, must have its fields'names corresponding exactly to one of the following:
  * <ul>
@@ -39,9 +40,9 @@ import be.florien.joinorm.primitivefield.StringField;
  * <li>the other table's name if the object's field is another POJO created from database
  * <li>the alias specified for this parser by {@link be.florien.joinorm.architecture.DBTable#setAlias(String) setAlias}
  * </ul>
- * 
- * @author Florien Flament
+ *
  * @param <T> POJO representing the table, which will get the info from the database at the end of the parsing
+ * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
 
@@ -51,7 +52,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private List<DBTable<?>> mDBTableQueryList = new ArrayList<>();
     private List<DBPrimitiveField<?>> mDBPrimitiveQueryList = new ArrayList<>();
-    private List<String> mDeleteIdsList = new ArrayList<>();
+    private List<DBID> mDeleteIdsList = new ArrayList<>();
     private List<String> mDBTableNameWriteList = new ArrayList<>();
     private List<String> mDBTableValueRefWriteList = new ArrayList<>();
     private List<DBTable<?>> mDBTableWriteList = new ArrayList<>();
@@ -62,18 +63,17 @@ public abstract class DBTable<T> extends DBData<T> {
 
     //todo getId return a list of id, and the rest is responsible to get it right ?
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
-    private boolean mIsDualId;
     private int mInitRowPosition;
     private int mRedundantRows;
 
     private int mNumberOfColumnQueried = -1;
     private List<T> mResultList = new ArrayList<>();
-    private int mLastId1 = -100;
-    private int mLastId2 = -100;
+    private DBID mIds = new DBID();
     private boolean mIsANewObject = true;
     private boolean mIsGonnaBeRedundant = false;
     private boolean mIsSubTableFinished;
     private T mObjectToWrite;
+    private int mIdNumber;
 
     /*
      * CONSTRUCTOR
@@ -81,9 +81,9 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Constructs a new DBTable. Implementation of this class should do a no-parameters constructor calling this constructor.
-     * 
+     *
      * @param tableName Name of the table as in the database
-     * @param myClass Class of the result POJO
+     * @param myClass   Class of the result POJO
      */
     protected DBTable(String tableName, Class<T> myClass) {
         mTableName = tableName;
@@ -103,7 +103,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * <li>a POJO contains more than one occurrence of another table's POJO
      * <li>the table is referenced multiple times in the JOIN statement, creating confusion for the request
      * </ul>
-     * 
+     *
      * @param aliasName The alias that will be set for the table in the request AND used to retrieve the POJO's field to assign the value
      */
     public void setAlias(String aliasName) {
@@ -115,43 +115,30 @@ public abstract class DBTable<T> extends DBData<T> {
      */
 
     /**
-     * Add the ID to the query. Implementation of this class must use {@link DBTable#selectId(String)} or {@link DBTable#selectId(String, String)}.
-     * 
+     * Add the ID to the query. Implementation of this class must use {@link DBTable#selectId(String...)}.
+     *
      * @return this instance of DBTable
      */
     public abstract DBTable<T> selectId();
 
     /**
      * Add the ID to the query. This implementation make sure that the ID can be found anytime during extraction of the datas.
-     * 
-     * @param columnName The name of the field as in the database's table
+     *
+     * @param columnNames The names of the field as in the database's table
      */
-    protected void selectId(String columnName) {
-        mIsDualId = false;
-        IntField intField = new IntField(columnName);
-        mDBPrimitiveQueryList.remove(intField);
-        mDBPrimitiveQueryList.add(0, intField);
-    }
-
-    /**
-     * Add the IDs to the query. This implementation make sure that the IDs can be found anytime during extraction of the datas.
-     * 
-     * @param column1Name The name of the first field as in the database's table
-     * @param column2Name The name of the second field as in the database's table
-     */
-    protected void selectId(String column1Name, String column2Name) {
-        mIsDualId = true;
-        IntField intField1 = new IntField(column1Name);
-        IntField intField2 = new IntField(column2Name);
-        mDBPrimitiveQueryList.remove(intField1);
-        mDBPrimitiveQueryList.remove(intField2);
-        mDBPrimitiveQueryList.add(0, intField1);
-        mDBPrimitiveQueryList.add(1, intField2);
+    protected void selectId(String... columnNames) {
+        mIdNumber = columnNames.length;
+        for (int position = 0; position < columnNames.length; position++) {
+            String columnName = columnNames[position];
+            IntField intField = new IntField(columnName);
+            mDBPrimitiveQueryList.remove(intField);
+            mDBPrimitiveQueryList.add(position, intField);
+        }
     }
 
     /**
      * Add a simple String to the query.
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     protected void selectString(String columnName) {
@@ -163,7 +150,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a simple int to the query.
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     protected void selectInt(String columnName) {
@@ -174,7 +161,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a simple boolean to the query.
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     protected void selectBoolean(String columnName) {
@@ -185,7 +172,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a simple double to the query.
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     protected void selectDouble(String columnName) {
@@ -196,7 +183,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add the table represented by tableField to the query.
-     * 
+     *
      * @param tableField A representation of the table to query.
      */
     protected void selectTable(DBTable<?> tableField) {
@@ -211,37 +198,39 @@ public abstract class DBTable<T> extends DBData<T> {
      */
 
     /**
-     * Add an ID to the list of IDs to delete from the DataBase
-     * 
-     * @param id The id of the object to delete
+     * Add an ID (or composite) to the list of IDs to delete from the DataBase
+     *
+     * @param ids The ids of the object to delete
      */
-    protected void deleteId(int id) {
-        mDeleteIdsList.remove(String.valueOf(id));
-        mDeleteIdsList.add(String.valueOf(id));
+    protected void deleteId(int... ids) {
+        DBID dbId = new DBID(ids);
+        mDeleteIdsList.remove(dbId);
+        mDeleteIdsList.add(dbId);
     }
 
     /**
      * Create and construct a list of {@link be.florien.joinorm.architecture.DBDelete DBDelete}
-     * 
+     *
      * @return A list of DBDelete
      */
     public List<DBDelete> getDelete() {
         List<DBDelete> deletes = new ArrayList<>();
-        for (String id : mDeleteIdsList) {
-            deletes.add(new DBDelete(mDataName, mDataName + "." + getId(), id));
+        for (DBID id : mDeleteIdsList) {
+            List<String> idNames = getCompleteId();
+            deletes.add(new DBDelete(mDataName, idNames, id.getIds()));
         }
         return deletes;
     }
 
     /*
-     * WRITING HANDLING TODO javadoc for this part
+     * WRITING HANDLING
      */
 
     /**
      * Add the value to be written in columnName
-     * 
+     *
      * @param columnName Name of the column corresponding to the value
-     * @param value The value for the object at corresponding columnName
+     * @param value      The value for the object at corresponding columnName
      */
     @SuppressWarnings("unused")
     protected void writeString(String columnName, String value) {
@@ -257,7 +246,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a null value to be written
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     @SuppressWarnings("unused")
@@ -269,7 +258,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a boolean value to be written
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     @SuppressWarnings("unused")
@@ -286,7 +275,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a int value to be written
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     @SuppressWarnings("unused")
@@ -303,7 +292,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a double value to be written
-     * 
+     *
      * @param columnName the field's name as in the database's table
      */
     @SuppressWarnings("unused")
@@ -320,7 +309,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add the table represented by tableField to the query.
-     * 
+     *
      * @param tableField A representation of the table to query.
      */
     @SuppressWarnings("unused")
@@ -339,13 +328,19 @@ public abstract class DBTable<T> extends DBData<T> {
 
     }
 
-    // TODO javadoc
-    public int getValuesToWrite(List<DBWrite> values, String reference) {
+    /**
+     * Populate a list of DBWrite with the data asked for writing.
+     *
+     * @param writes    The list of DBWrite to populate.
+     * @param reference If given the name of the id field, will return it's value. // todo I don't remember if this is correct, also, multiple ids.
+     * @return The id if the name is provided, 0 otherwise.
+     */
+    public int getValuesToWrite(List<DBWrite> writes, String reference) {
         int referenceId = 0;
         try {
             ContentValues value = new ContentValues();
             for (int i = 0; i < mDBTableNameWriteList.size(); i++) {
-                value.put(mDBTableNameWriteList.get(i), mDBTableWriteList.get(i).getValuesToWrite(values, mDBTableValueRefWriteList.get(i)));
+                value.put(mDBTableNameWriteList.get(i), mDBTableWriteList.get(i).getValuesToWrite(writes, mDBTableValueRefWriteList.get(i)));
             }
             for (DBPrimitiveField<?> field : mDBPrimitiveWriteList) {
                 if (field instanceof StringField) {
@@ -365,7 +360,7 @@ public abstract class DBTable<T> extends DBData<T> {
                     value.put(field.mDataName, integer);
                 }
             }
-            values.add(new DBWrite(mDataName, value));
+            writes.add(new DBWrite(mDataName, value));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -379,7 +374,7 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Construct and return an array of fields' names selected for the query. This method should be used uniquely if this DBTable is not a inner
      * DBData.
-     * 
+     *
      * @return an array of fields'names to be queried
      */
     public String[] getProjection() {
@@ -419,60 +414,93 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Return the column name for this table id without the table name or its alias
-     * 
+     *
      * @return The column name for this table id
      */
-    protected abstract String getId();
+    protected abstract List<String> getId();
+
+    /**
+     * todo
+     * @return
+     */
+    protected List<String> getCompleteId() {
+        List<String> ids = new ArrayList<>(getId().size());
+        for (String idPart : getId()) {
+            ids.add(mDataName + "." + idPart);
+        }
+
+        return ids;
+    }
 
     /**
      * Construct and return the join statement to join this table and the one in parameter, preferably using
-     * {@link be.florien.joinorm.architecture.DBTable#getJoinOnId(DBTable, String, boolean) getJoinOnId},
-     * {@link be.florien.joinorm.architecture.DBTable#getJoinOnRef(DBTable, String, boolean) getJoinOnRef}. Constructing and returning the
+     * {@link be.florien.joinorm.architecture.DBTable#getJoinOnId(DBTable, boolean, String...) getJoinOnId},
+     * {@link be.florien.joinorm.architecture.DBTable#getJoinOnRef(DBTable, boolean, String...) getJoinOnRef}. Constructing and returning the
      * join statement manually is also supported, but it should be kept in mind that this table could have been assigned to an alias, and thus
      * {@link be.florien.joinorm.architecture.DBData#getDataName() getDataName} should be used to get the table's name or alias.
-     * 
+     *
      * @param innerTable The DBTable representing a POJO which is present in this DBTable's POJO. Implementation of this method should test which
-     *            table it represent and return the according JOIN statement.
+     *                   table it represent and return the according JOIN statement.
      * @return The JOIN statement
      */
     protected abstract String getJoinToInnerTable(DBTable<?> innerTable);
 
     /**
      * Construct and return a JOIN statement where innerTable contain a reference to this table ID
-     * 
-     * @param innerTable The table to join to this one
+     *
+     * @param innerTable    The table to join to this one
      * @param innerTableRef The columnName which refer to this table ID, without the table's name
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.ID = INNER_TABLE[_ALIAS].INNER_TABLE_REF"
      */
-    protected String getJoinOnId(DBTable<?> innerTable, String innerTableRef, boolean isLeftJoin) {
-        return (isLeftJoin? "LEFT " : "")+ "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
+    protected String getJoinOnId(DBTable<?> innerTable, boolean isLeftJoin, String... innerTableRef) {
+        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
                 + getJoinConditionOnID(innerTable, innerTableRef);
     }
 
     /**
      * Construct and return a JOIN statement where this table contain a reference to innerTable ID
-     * 
-     * @param innerTable The table to join to this one
+     *
+     * @param innerTable   The table to join to this one
      * @param thisTableRef The columnName which refer to the innerTable ID, without the table's name
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.THIS_TABLE_REF = INNER_TABLE[_ALIAS].ID"
      */
-    protected String getJoinOnRef(DBTable<?> innerTable, String thisTableRef, boolean isLeftJoin) {
-        return (isLeftJoin? "LEFT " : "")+  "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
+    protected String getJoinOnRef(DBTable<?> innerTable, boolean isLeftJoin, String... thisTableRef) {
+        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
                 + getJoinConditionOnRef(innerTable, thisTableRef);
     }
 
-    private String getJoinConditionOnID(DBTable<?> innerTable, String innerTableRef) {
-        return " ON " + mDataName + "." + getId() + " = " + innerTable.mDataName + "." + innerTableRef;
+    private String getJoinConditionOnID(DBTable<?> innerTable, String... innerTableRef) {//todo verify if all is same size
+        String join = " ON ";
+        List<String> ids = getCompleteId();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                join = join + " and ";
+            }
+
+            join = join + ids.get(i) + " = " + innerTable.mDataName + "." + innerTableRef[i];
+        }
+
+        return join;
     }
 
-    private String getJoinConditionOnRef(DBTable<?> innerTable, String thisTableRef) {
-        return " ON " + mDataName + "." + thisTableRef + " = " + innerTable.mDataName + "." + innerTable.getId();
+    private String getJoinConditionOnRef(DBTable<?> innerTable, String... thisTableRef) {//todo verify if all is same size
+        String join = " ON ";
+        List<String> ids = getId();
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) {
+                join = join + " and ";
+            }
+
+            join = join + mDataName + "." + thisTableRef[i] + " = " + innerTable.mDataName + "." + innerTable.getId().get(i);
+        }
+
+        return join;
     }
 
     /**
      * Construct and return the JOIN statement for this table and all its inner tables. This method should be used uniquely if this DBTable is not a
      * inner DBData.
-     * 
+     *
      * @return The complete JOIN statement for the query
      */
     public String getJoinComplete() {
@@ -494,7 +522,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Construct and return the where statement associated
-     * 
+     *
      * @return the where statement
      */
     public String getWhere() {
@@ -526,7 +554,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Add a statement to add to a collection of WhereStatement
-     * 
+     *
      * @param statement the where statement
      */
     public DBTable<T> addWhere(WhereStatement statement) {
@@ -540,7 +568,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Return a list of fields'names from the database to order the query by.
-     * 
+     *
      * @return a list of fields'names
      */
     public String getOrderBy() {
@@ -554,11 +582,19 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Return a column name in the form "TABLE_ALIAS.COLUMN_NAME". Override this method if you want the sorting to be another column than the ID
      * (Default). But be careful as the datas from a single object must be in consecutive rows in the query result.
-     * 
+     *
      * @return A column name in the form "TABLE_ALIAS.COLUMN_NAME"
      */
     protected String getOrderByForThis() {
-        return mDataName + "." + getId();
+        String orderBy = "";
+        List<String> completeId = getCompleteId();
+        for (String idComplete : completeId) {
+            if (!idComplete.equals(completeId.get(0))) {
+                orderBy = orderBy + ", ";
+            }
+            orderBy = orderBy + idComplete;
+        }
+        return orderBy;
     }
 
     /*
@@ -567,7 +603,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
     /**
      * Extract the datas from the Cursor in parameter and return a List of POJO filled with queried fields
-     * 
+     *
      * @param cursor The cursor which has received the datas from the database.
      * @return a List of POJO
      */
@@ -600,27 +636,26 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     private void initId(Cursor cursor, int column) {
-        mLastId1 = cursor.getInt(column);
-        if (mIsDualId) {
-            mLastId2 = cursor.getInt(column + 1);
+        for (int offset = 0; offset < mIdNumber; offset++) {
+            mIds.getIds().add(String.valueOf(cursor.getInt(column + offset)));
         }
     }
 
     private boolean compareIDs(Cursor cursor, int column) {
-        if (mLastId1 == -100) {
+        if (mIds.getIds().size() < 1) {
             return true;
         }
-        if (!mIsDualId) {
-            return mLastId1 == cursor.getInt(column);
-        } else {
-            return mLastId1 == cursor.getInt(column) && mLastId2 == cursor.getInt(column + 1);
-
+        for (int offset = 0; offset < mIdNumber; offset++) {
+            if (!mIds.getIds().get(offset).equals(String.valueOf(cursor.getInt(column + offset)))) {
+                return false;
+            }
         }
+        return true;
     }
 
     /**
      * Return the number of rows used for the making of this representation
-     * 
+     *
      * @return the number of rows used
      */
     private int getRowToFinishParsing() {
@@ -653,7 +688,7 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the POJO. Retrieve
      * said field by using the field to set. Override this method if you want the POJO's field name and fieldToSet to be different.
-     * 
+     *
      * @param fieldToSet The POJO field name
      * @return The Field to be set
      * @throws NoSuchFieldException
@@ -764,8 +799,7 @@ public abstract class DBTable<T> extends DBData<T> {
             for (DBData<?> fieldToReset : mDBTableQueryList) {
                 fieldToReset.reset();
             }
-            mLastId1 = -100;
-            mLastId2 = -100;
+            mIds = new DBID();
             mIsANewObject = true;
             mIsSubTableFinished = false;
         } catch (Exception e) {

@@ -4,10 +4,13 @@ import com.squareup.javapoet.ClassName;
 import com.squareup.javapoet.FieldSpec;
 import com.squareup.javapoet.MethodSpec;
 import com.squareup.javapoet.ParameterSpec;
+import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 
+import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.annotation.processing.Messager;
@@ -37,6 +40,7 @@ class FieldRelatedElementsBuilder {
     private Messager messager;
     private List<MethodSpec> methods;
     private List<FieldSpec> fields;
+    private List<Element> ids;
     private Element fieldElement;
 
     /**
@@ -51,6 +55,7 @@ class FieldRelatedElementsBuilder {
         this.messager = messager;
         this.methods = new ArrayList<>();
         this.fields = new ArrayList<>();
+        this.ids = new ArrayList<>();
     }
 
     /**
@@ -60,32 +65,18 @@ class FieldRelatedElementsBuilder {
     void addFieldRelatedElements(Element fieldElement) {
         this.fieldElement = fieldElement;
         TypeMirror typeMirror = fieldElement.asType();
-        MethodSpec.Builder selectBuilder;
         boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
-
-        if (isId) {
-            methods.add(MethodSpec.methodBuilder("getId")
-                    .returns(String.class)
-                    .addAnnotation(Override.class)
-                    .addModifiers(Modifier.PUBLIC)
-                    .addStatement("return $S", fieldElement.getSimpleName()) //todo change here for when dual id is correctly implemented (triple id ? quadruple id ??? <not defined number> id ??!??!?)
-                    .build());
-        }
-
         String dbTypeName = getTypeName(typeMirror);
         String selectStatementFormat = "select$L($S)";
         String parameterName = fieldElement.getSimpleName().toString();
         String selectMethodName = snakeToCamel(parameterName);
+        selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
+        MethodSpec.Builder selectBuilder = MethodSpec.methodBuilder(selectMethodName);
 
         if (isId) {
-            dbTypeName = "Id";
-            selectBuilder = MethodSpec.methodBuilder("selectId");
-            selectBuilder.addAnnotation(Override.class);
-        } else {
-            selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
-            selectBuilder = MethodSpec.methodBuilder(selectMethodName);
-
+            ids.add(fieldElement);
         }
+
 
         if (dbTypeName.equals(DECLARED_TYPE_NAME)) {
             DeclaredType fieldDeclaredType = (DeclaredType) fieldElement.asType();
@@ -123,10 +114,10 @@ class FieldRelatedElementsBuilder {
             }
         }
 
-        boolean shouldWriteColumnName = false;
+        boolean shouldWriteColumnName = isId;
         ParameterSpec value = ParameterSpec.builder(TypeName.get(typeMirror), "value").build();
 
-        if (isGeneratingWrite && !isId) {
+        if (isGeneratingWrite) {
             methods.add(MethodSpec.methodBuilder("write" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1))
                     .addModifiers(Modifier.PUBLIC)
                     .addParameter(value)
@@ -135,18 +126,7 @@ class FieldRelatedElementsBuilder {
             shouldWriteColumnName = true;
         }
 
-
-        if (isGeneratingWrite && isId) {
-            methods.add(MethodSpec.methodBuilder("write" + parameterName.substring(0, 1).toUpperCase() + parameterName.substring(1))
-                    .addModifiers(Modifier.PUBLIC)
-                    .addParameter(value)
-                    .addStatement("write$L($L)", dbTypeName, "value")
-                    .build());
-            shouldWriteColumnName = true;
-        }
-
-
-        if (isGeneratingSelect || isId) {
+        if (isGeneratingSelect && !isId) {
             methods.add(selectBuilder.returns(tableClassName)
                     .addModifiers(Modifier.PUBLIC)
                     .addStatement(selectStatementFormat, dbTypeName, parameterName)
@@ -155,15 +135,42 @@ class FieldRelatedElementsBuilder {
             shouldWriteColumnName = true;
         }
 
-
         if (shouldWriteColumnName) {
             addColumnField(fieldElement);
         }
     }
 
     void addSpecToBuilder(TypeSpec.Builder classBuilder) {
+        classBuilder.addMethods(getIdMethods());
         classBuilder.addMethods(methods);
         classBuilder.addFields(fields);
+    }
+
+    private List<MethodSpec> getIdMethods() {
+        List<MethodSpec> idMethods = new ArrayList<>(2);
+        ParameterizedTypeName listTypeName = ParameterizedTypeName.get(List.class, String.class);
+        String getIdParameter = "";
+        for (Element idElement : ids) {
+            if (!idElement.equals(ids.get(0))) {
+                getIdParameter = getIdParameter + ", ";
+            }
+
+            getIdParameter = getIdParameter + "\"" + idElement.getSimpleName() + "\"";
+        }
+        idMethods.add(MethodSpec.methodBuilder("getId")
+                .addModifiers(Modifier.PUBLIC)
+                .returns(listTypeName)
+                .addAnnotation(Override.class)
+                .addStatement("return $T.asList($L)", Arrays.class, getIdParameter).build());
+        idMethods.add(MethodSpec.methodBuilder("selectId")
+                .addModifiers(Modifier.PUBLIC)
+                .returns(tableClassName)
+                .addAnnotation(Override.class)
+                .addStatement("selectId($L)", getIdParameter)
+                .addStatement("return this")
+                .build());
+
+        return idMethods;
     }
 
     /**

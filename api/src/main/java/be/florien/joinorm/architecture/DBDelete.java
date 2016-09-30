@@ -1,16 +1,18 @@
 package be.florien.joinorm.architecture;
 
 
+import java.util.List;
+
 public class DBDelete {
-    
-    private String mValue;
+
     private String mTableName;
-    private String mId;
+    private List<String> mValues;
+    private List<String> mId;
     
-    public DBDelete(String tableName, String id, String value){
-        mValue = value;
+    public DBDelete(String tableName, List<String> ids, List<String> values){
+        mValues = values;
         mTableName = tableName;
-        mId = id;
+        mId = ids;
     }
 
     public String getTableName() {
@@ -18,11 +20,19 @@ public class DBDelete {
     }
 
     public String getWhereClause() {
-        return mId + " = ?";
+        String where = "";
+        for (String id : mId) {
+            if (!id.equals(mId.get(0))) {
+                where = where + " and";
+            }
+            where = where + mId.get(0) + " = ?";
+        }
+
+        return where;
     }
 
-    public String getWhereArgs() {
-        return mValue;
+    public List<String> getWhereArgs() {
+        return mValues;
     }
 
 }
