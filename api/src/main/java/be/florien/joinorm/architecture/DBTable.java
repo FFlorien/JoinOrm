@@ -4,7 +4,6 @@ package be.florien.joinorm.architecture;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.text.TextUtils;
-import android.util.Log;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
@@ -50,30 +49,29 @@ public abstract class DBTable<T> extends DBData<T> {
      * FIELDS
      */
 
-    private List<DBTable<?>> mDBTableQueryList = new ArrayList<>();
-    private List<DBPrimitiveField<?>> mDBPrimitiveQueryList = new ArrayList<>();
-    private List<DBID> mDeleteIdsList = new ArrayList<>();
-    private List<String> mDBTableNameWriteList = new ArrayList<>();
-    private List<String> mDBTableValueRefWriteList = new ArrayList<>();
-    private List<DBTable<?>> mDBTableWriteList = new ArrayList<>();
-    private List<DBPrimitiveField<?>> mDBPrimitiveWriteList = new ArrayList<>();
-    private List<WhereStatement> mWhereSet = new ArrayList<>();
-    private final String mTableName;
-    protected final Class<T> mClass;
+    private List<DBTable<?>> tableQueries = new ArrayList<>();
+    private List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
+    private List<DBID> deleteIds = new ArrayList<>();
+    private List<String> tableNameWrites = new ArrayList<>();
+    private List<String> tableValueRefWrites = new ArrayList<>();
+    private List<DBTable<?>> tableWrites = new ArrayList<>();
+    private List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
+    private List<WhereStatement> wheres = new ArrayList<>();
+    private final String tableName;
+    protected final Class<T> modelClass;
 
-    //todo getId return a list of id, and the rest is responsible to get it right ?
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
-    private int mInitRowPosition;
-    private int mRedundantRows;
+    private int initRowPosition;
+    private int redundantRows;
 
-    private int mNumberOfColumnQueried = -1;
-    private List<T> mResultList = new ArrayList<>();
-    private DBID mIds = new DBID();
-    private boolean mIsANewObject = true;
-    private boolean mIsGonnaBeRedundant = false;
-    private boolean mIsSubTableFinished;
-    private T mObjectToWrite;
-    private int mIdNumber;
+    private int numberOfColumnQueried = -1;
+    private List<T> results = new ArrayList<>();
+    private DBID ids = new DBID();
+    private boolean isANewObject = true;
+    private boolean isGonnaBeRedundant = false;
+    private boolean isSubTableFinished;
+    private T objectToWrite;
+    private int idNumber;
 
     /*
      * CONSTRUCTOR
@@ -86,11 +84,11 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param myClass   Class of the result POJO
      */
     protected DBTable(String tableName, Class<T> myClass) {
-        mTableName = tableName;
-        mDataName = tableName;
-        mClass = myClass;
+        this.tableName = tableName;
+        dataName = tableName;
+        modelClass = myClass;
         try {
-            mObjectToWrite = mClass.newInstance();
+            objectToWrite = modelClass.newInstance();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -107,7 +105,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param aliasName The alias that will be set for the table in the request AND used to retrieve the POJO's field to assign the value
      */
     public void setAlias(String aliasName) {
-        mDataName = aliasName;
+        dataName = aliasName;
     }
 
     /*
@@ -127,12 +125,12 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param columnNames The names of the field as in the database's table
      */
     protected void selectId(String... columnNames) {
-        mIdNumber = columnNames.length;
+        idNumber = columnNames.length;
         for (int position = 0; position < columnNames.length; position++) {
             String columnName = columnNames[position];
             IntField intField = new IntField(columnName);
-            mDBPrimitiveQueryList.remove(intField);
-            mDBPrimitiveQueryList.add(position, intField);
+            primitiveQueries.remove(intField);
+            primitiveQueries.add(position, intField);
         }
     }
 
@@ -143,8 +141,8 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected void selectString(String columnName) {
         StringField stringField = new StringField(columnName);
-        mDBPrimitiveQueryList.remove(stringField);
-        mDBPrimitiveQueryList.add(stringField);
+        primitiveQueries.remove(stringField);
+        primitiveQueries.add(stringField);
 
     }
 
@@ -155,8 +153,8 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected void selectInt(String columnName) {
         IntField intField = new IntField(columnName);
-        mDBPrimitiveQueryList.remove(intField);
-        mDBPrimitiveQueryList.add(intField);
+        primitiveQueries.remove(intField);
+        primitiveQueries.add(intField);
     }
 
     /**
@@ -166,8 +164,8 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected void selectBoolean(String columnName) {
         BooleanField booleanField = new BooleanField(columnName);
-        mDBPrimitiveQueryList.remove(booleanField);
-        mDBPrimitiveQueryList.add(booleanField);
+        primitiveQueries.remove(booleanField);
+        primitiveQueries.add(booleanField);
     }
 
     /**
@@ -177,8 +175,8 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected void selectDouble(String columnName) {
         DoubleField doubleField = new DoubleField(columnName);
-        mDBPrimitiveQueryList.remove(doubleField);
-        mDBPrimitiveQueryList.add(doubleField);
+        primitiveQueries.remove(doubleField);
+        primitiveQueries.add(doubleField);
     }
 
     /**
@@ -187,9 +185,9 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param tableField A representation of the table to query.
      */
     protected void selectTable(DBTable<?> tableField) {
-        mDBTableQueryList.remove(tableField);
+        tableQueries.remove(tableField);
         selectId();
-        mDBTableQueryList.add(tableField);
+        tableQueries.add(tableField);
 
     }
 
@@ -204,8 +202,8 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     protected void deleteId(int... ids) {
         DBID dbId = new DBID(ids);
-        mDeleteIdsList.remove(dbId);
-        mDeleteIdsList.add(dbId);
+        deleteIds.remove(dbId);
+        deleteIds.add(dbId);
     }
 
     /**
@@ -215,9 +213,9 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     public List<DBDelete> getDelete() {
         List<DBDelete> deletes = new ArrayList<>();
-        for (DBID id : mDeleteIdsList) {
+        for (DBID id : deleteIds) {
             List<String> idNames = getCompleteId();
-            deletes.add(new DBDelete(mDataName, idNames, id.getIds()));
+            deletes.add(new DBDelete(dataName, idNames, id.getIds()));
         }
         return deletes;
     }
@@ -235,10 +233,10 @@ public abstract class DBTable<T> extends DBData<T> {
     @SuppressWarnings("unused")
     protected void writeString(String columnName, String value) {
         StringField stringField = new StringField(columnName);
-        mDBPrimitiveWriteList.remove(stringField);
-        mDBPrimitiveWriteList.add(stringField);
+        primitiveWrites.remove(stringField);
+        primitiveWrites.add(stringField);
         try {
-            getFieldToSet(columnName).set(mObjectToWrite, value);
+            getFieldToSet(columnName).set(objectToWrite, value);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -252,8 +250,8 @@ public abstract class DBTable<T> extends DBData<T> {
     @SuppressWarnings("unused")
     protected void writeNull(String columnName) {
         NullField nullField = new NullField(columnName);
-        mDBPrimitiveWriteList.remove(nullField);
-        mDBPrimitiveWriteList.add(nullField);
+        primitiveWrites.remove(nullField);
+        primitiveWrites.add(nullField);
     }
 
     /**
@@ -264,10 +262,10 @@ public abstract class DBTable<T> extends DBData<T> {
     @SuppressWarnings("unused")
     protected void writeBoolean(String columnName, boolean bool) {
         BooleanField boolField = new BooleanField(columnName);
-        mDBPrimitiveWriteList.remove(boolField);
-        mDBPrimitiveWriteList.add(boolField);
+        primitiveWrites.remove(boolField);
+        primitiveWrites.add(boolField);
         try {
-            getFieldToSet(columnName).set(mObjectToWrite, bool);
+            getFieldToSet(columnName).set(objectToWrite, bool);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -281,10 +279,10 @@ public abstract class DBTable<T> extends DBData<T> {
     @SuppressWarnings("unused")
     protected void writeInt(String columnName, int integer) {
         IntField intField = new IntField(columnName);
-        mDBPrimitiveWriteList.remove(intField);
-        mDBPrimitiveWriteList.add(intField);
+        primitiveWrites.remove(intField);
+        primitiveWrites.add(intField);
         try {
-            getFieldToSet(columnName).set(mObjectToWrite, integer);
+            getFieldToSet(columnName).set(objectToWrite, integer);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -298,10 +296,10 @@ public abstract class DBTable<T> extends DBData<T> {
     @SuppressWarnings("unused")
     protected void writeDouble(String columnName, double doubleValue) {
         DoubleField doubleField = new DoubleField(columnName);
-        mDBPrimitiveWriteList.remove(doubleField);
-        mDBPrimitiveWriteList.add(doubleField);
+        primitiveWrites.remove(doubleField);
+        primitiveWrites.add(doubleField);
         try {
-            getFieldToSet(columnName).set(mObjectToWrite, doubleValue);
+            getFieldToSet(columnName).set(objectToWrite, doubleValue);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -314,14 +312,14 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     @SuppressWarnings("unused")
     protected void writeTable(DBTable<?> tableField, String tableRef, String tableRefValue, Object pojoToAssign) {
-        mDBTableWriteList.remove(tableField);
-        mDBTableWriteList.add(tableField);
-        mDBTableNameWriteList.remove(tableRef);
-        mDBTableNameWriteList.add(tableRef);
-        mDBTableValueRefWriteList.remove(tableRefValue);
-        mDBTableValueRefWriteList.add(tableRefValue);
+        tableWrites.remove(tableField);
+        tableWrites.add(tableField);
+        tableNameWrites.remove(tableRef);
+        tableNameWrites.add(tableRef);
+        tableValueRefWrites.remove(tableRefValue);
+        tableValueRefWrites.add(tableRefValue);
         try {
-            getFieldToSet(tableField).set(mObjectToWrite, pojoToAssign);
+            getFieldToSet(tableField).set(objectToWrite, pojoToAssign);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -339,28 +337,28 @@ public abstract class DBTable<T> extends DBData<T> {
         int referenceId = 0;
         try {
             ContentValues value = new ContentValues();
-            for (int i = 0; i < mDBTableNameWriteList.size(); i++) {
-                value.put(mDBTableNameWriteList.get(i), mDBTableWriteList.get(i).getValuesToWrite(writes, mDBTableValueRefWriteList.get(i)));
+            for (int i = 0; i < tableNameWrites.size(); i++) {
+                value.put(tableNameWrites.get(i), tableWrites.get(i).getValuesToWrite(writes, tableValueRefWrites.get(i)));
             }
-            for (DBPrimitiveField<?> field : mDBPrimitiveWriteList) {
+            for (DBPrimitiveField<?> field : primitiveWrites) {
                 if (field instanceof StringField) {
-                    value.put(field.mDataName, (String) getFieldToSet(field).get(mObjectToWrite));
+                    value.put(field.dataName, (String) getFieldToSet(field).get(objectToWrite));
                 } else if (field instanceof DoubleField) {
-                    value.put(field.mDataName, (Double) getFieldToSet(field).get(mObjectToWrite));
+                    value.put(field.dataName, (Double) getFieldToSet(field).get(objectToWrite));
                 } else if (field instanceof NullField) {
-                    value.putNull(field.mDataName);
+                    value.putNull(field.dataName);
                 } else if (field instanceof BooleanField) {
-                    value.put(field.mDataName, (Boolean) getFieldToSet(field).get(mObjectToWrite));
+                    value.put(field.dataName, (Boolean) getFieldToSet(field).get(objectToWrite));
                 } else if (field instanceof IntField) {
 
-                    Integer integer = (Integer) getFieldToSet(field).get(mObjectToWrite);
-                    if (field.mDataName.equals(reference)) {
+                    Integer integer = (Integer) getFieldToSet(field).get(objectToWrite);
+                    if (field.dataName.equals(reference)) {
                         referenceId = integer;
                     }
-                    value.put(field.mDataName, integer);
+                    value.put(field.dataName, integer);
                 }
             }
-            writes.add(new DBWrite(mDataName, value));
+            writes.add(new DBWrite(dataName, value));
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -386,11 +384,11 @@ public abstract class DBTable<T> extends DBData<T> {
     @Override
     protected List<String> buildProjection(String tableName) {
         List<String> projection = new ArrayList<>();
-        for (DBData<?> fieldToSelect : mDBPrimitiveQueryList) {
-            projection.addAll(fieldToSelect.buildProjection(mDataName));
+        for (DBData<?> fieldToSelect : primitiveQueries) {
+            projection.addAll(fieldToSelect.buildProjection(dataName));
         }
-        for (DBData<?> fieldToSelect : mDBTableQueryList) {
-            projection.addAll(fieldToSelect.buildProjection(mDataName));
+        for (DBData<?> fieldToSelect : tableQueries) {
+            projection.addAll(fieldToSelect.buildProjection(dataName));
         }
         return projection;
     }
@@ -399,13 +397,13 @@ public abstract class DBTable<T> extends DBData<T> {
      * Used to know how many columns has been read by this parser
      */
     private int getNumberOfColumnsQueried() {
-        if (mNumberOfColumnQueried == -1) {
-            mNumberOfColumnQueried = mDBPrimitiveQueryList.size();
-            for (DBTable<?> field : mDBTableQueryList) {
-                mNumberOfColumnQueried += field.getNumberOfColumnsQueried();
+        if (numberOfColumnQueried == -1) {
+            numberOfColumnQueried = primitiveQueries.size();
+            for (DBTable<?> field : tableQueries) {
+                numberOfColumnQueried += field.getNumberOfColumnsQueried();
             }
         }
-        return mNumberOfColumnQueried;
+        return numberOfColumnQueried;
     }
 
     /*
@@ -426,7 +424,7 @@ public abstract class DBTable<T> extends DBData<T> {
     protected List<String> getCompleteId() {
         List<String> ids = new ArrayList<>(getId().size());
         for (String idPart : getId()) {
-            ids.add(mDataName + "." + idPart);
+            ids.add(dataName + "." + idPart);
         }
 
         return ids;
@@ -453,7 +451,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.ID = INNER_TABLE[_ALIAS].INNER_TABLE_REF"
      */
     protected String getJoinOnId(DBTable<?> innerTable, boolean isLeftJoin, String... innerTableRef) {
-        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
+        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.tableName + (innerTable.dataName.equals(tableName) ? "" : " AS " + innerTable.dataName)
                 + getJoinConditionOnID(innerTable, innerTableRef);
     }
 
@@ -465,7 +463,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.THIS_TABLE_REF = INNER_TABLE[_ALIAS].ID"
      */
     protected String getJoinOnRef(DBTable<?> innerTable, boolean isLeftJoin, String... thisTableRef) {
-        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.mTableName + (innerTable.mDataName.equals(mTableName) ? "" : " AS " + innerTable.mDataName)
+        return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.tableName + (innerTable.dataName.equals(tableName) ? "" : " AS " + innerTable.dataName)
                 + getJoinConditionOnRef(innerTable, thisTableRef);
     }
 
@@ -477,7 +475,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 join = join + " and ";
             }
 
-            join = join + ids.get(i) + " = " + innerTable.mDataName + "." + innerTableRef[i];
+            join = join + ids.get(i) + " = " + innerTable.dataName + "." + innerTableRef[i];
         }
 
         return join;
@@ -491,7 +489,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 join = join + " and ";
             }
 
-            join = join + mDataName + "." + thisTableRef[i] + " = " + innerTable.mDataName + "." + innerTable.getId().get(i);
+            join = join + dataName + "." + thisTableRef[i] + " = " + innerTable.dataName + "." + innerTable.getId().get(i);
         }
 
         return join;
@@ -504,12 +502,12 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return The complete JOIN statement for the query
      */
     public String getJoinComplete() {
-        return mTableName + (mDataName.equals(mTableName) ? "" : " AS " + mDataName) + getJoinsToAllTables();
+        return tableName + (dataName.equals(tableName) ? "" : " AS " + dataName) + getJoinsToAllTables();
     }
 
     private String getJoinsToAllTables() {
         String tables = "";
-        for (DBTable<?> field : mDBTableQueryList) {
+        for (DBTable<?> field : tableQueries) {
             tables = tables + " " + getJoinToInnerTable(field);
             tables = tables + " " + field.getJoinsToAllTables();
         }
@@ -527,7 +525,7 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     public String getWhere() {
         String where = "";
-        for (WhereStatement statement : mWhereSet) {
+        for (WhereStatement statement : wheres) {
             if (!TextUtils.isEmpty(where)) {
                 if (statement.isOr()) {
                     where += " OR ";
@@ -537,12 +535,12 @@ public abstract class DBTable<T> extends DBData<T> {
             } else {
                 where += "(";
             }
-            where += mDataName + "." + statement.getStatement();
+            where += dataName + "." + statement.getStatement();
         }
         if (!TextUtils.isEmpty(where)) {
             where += ")";
         }
-        for (DBTable<?> field : mDBTableQueryList) {
+        for (DBTable<?> field : tableQueries) {
             String toAdd = field.getWhere();
             if (!TextUtils.isEmpty(toAdd) && !TextUtils.isEmpty(where)) {
                 where += " AND ";
@@ -558,7 +556,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param statement the where statement
      */
     public DBTable<T> addWhere(WhereStatement statement) {
-        mWhereSet.add(statement);
+        wheres.add(statement);
         return this;
     }
 
@@ -573,7 +571,7 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     public String getOrderBy() {
         String orderby = getOrderByForThis();
-        for (DBTable<?> fieldToSelect : mDBTableQueryList) {
+        for (DBTable<?> fieldToSelect : tableQueries) {
             orderby += ", " + fieldToSelect.getOrderBy();
         }
         return orderby;
@@ -618,7 +616,7 @@ public abstract class DBTable<T> extends DBData<T> {
             if (compareIDs(cursor, 0)) {
                 extractRowValue(cursor, 0);
                 int rowToFinishParsing = getRowToFinishParsing();
-                // Log.d("POKEMON", "Row to pass == " + rowToFinishParsing + " | number of parsed :" + mResultList.size());
+                // Log.d("POKEMON", "Row to pass == " + rowToFinishParsing + " | number of parsed :" + results.size());
                 for (int rowToPass = rowToFinishParsing; rowToPass > 0 && !cursor.isAfterLast(); rowToPass--) {
                     cursor.moveToNext();
                 }
@@ -636,17 +634,17 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     private void initId(Cursor cursor, int column) {
-        for (int offset = 0; offset < mIdNumber; offset++) {
-            mIds.getIds().add(String.valueOf(cursor.getInt(column + offset)));
+        for (int offset = 0; offset < idNumber; offset++) {
+            ids.getIds().add(String.valueOf(cursor.getInt(column + offset)));
         }
     }
 
     private boolean compareIDs(Cursor cursor, int column) {
-        if (mIds.getIds().size() < 1) {
+        if (ids.getIds().size() < 1) {
             return true;
         }
-        for (int offset = 0; offset < mIdNumber; offset++) {
-            if (!mIds.getIds().get(offset).equals(String.valueOf(cursor.getInt(column + offset)))) {
+        for (int offset = 0; offset < idNumber; offset++) {
+            if (!ids.getIds().get(offset).equals(String.valueOf(cursor.getInt(column + offset)))) {
                 return false;
             }
         }
@@ -660,14 +658,14 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     private int getRowToFinishParsing() {
         int rows;
-        if (!mIsGonnaBeRedundant) {
+        if (!isGonnaBeRedundant) {
             rows = 1;
-            for (DBTable<?> table : mDBTableQueryList) {
+            for (DBTable<?> table : tableQueries) {
                 int rowToFinishParsing = table.getRowToFinishParsing();
                 rows = (rows >= rowToFinishParsing ? rows : rowToFinishParsing);
             }
         } else {
-            rows = mRedundantRows;
+            rows = redundantRows;
         }
         return rows;
     }
@@ -682,7 +680,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @throws NoSuchFieldException
      */
     protected Field getFieldToSet(DBData<?> fieldToSet) throws NoSuchFieldException {
-        return getFieldToSet(fieldToSet.mDataName);
+        return getFieldToSet(fieldToSet.dataName);
     }
 
     /**
@@ -694,7 +692,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @throws NoSuchFieldException
      */
     private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        return mClass.getField(fieldToSet);
+        return modelClass.getField(fieldToSet);
     }
 
     private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
@@ -706,34 +704,34 @@ public abstract class DBTable<T> extends DBData<T> {
     @Override
     protected void extractRowValue(Cursor cursor, int column) {
         try {
-            if (mInitRowPosition == -1) {
-                mInitRowPosition = cursor.getPosition();
+            if (initRowPosition == -1) {
+                initRowPosition = cursor.getPosition();
             }
-            mIsSubTableFinished = false;
+            isSubTableFinished = false;
 
             int currentColumn = column;
 
-            if (mIsANewObject) {
-                for (DBPrimitiveField<?> primitiveToExtract : mDBPrimitiveQueryList) {
+            if (isANewObject) {
+                for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
                     primitiveToExtract.extractRowValue(cursor, currentColumn);
                     Field field = getFieldToSet(primitiveToExtract);
                     field.set(mCurrentObject, primitiveToExtract.getValue());
                     currentColumn++;
                 }
-                mIsANewObject = false;
+                isANewObject = false;
             } else {
-                currentColumn += mDBPrimitiveQueryList.size();
+                currentColumn += primitiveQueries.size();
             }
 
-            for (DBTable<?> tableToExtract : mDBTableQueryList) {
-                if (mIsSubTableFinished && !tableToExtract.mIsGonnaBeRedundant) {
+            for (DBTable<?> tableToExtract : tableQueries) {
+                if (isSubTableFinished && !tableToExtract.isGonnaBeRedundant) {
                     tableToExtract.setComplete();
                     tableToExtract.setIsGonnaBeRedundant(true, cursor.getPosition());
                     setValues(tableToExtract);
                     tableToExtract.reset();
                     tableToExtract.initId(cursor, currentColumn);
                     tableToExtract.extractRowValue(cursor, currentColumn);
-                } else if (!tableToExtract.mIsGonnaBeRedundant) {
+                } else if (!tableToExtract.isGonnaBeRedundant) {
                     if (!tableToExtract.compareIDs(cursor, currentColumn)) {
                         tableToExtract.setComplete();
                         if (isAList(tableToExtract)) {
@@ -743,11 +741,11 @@ public abstract class DBTable<T> extends DBData<T> {
                             field.set(mCurrentObject, tableToExtract.getValue());
                         }
                         tableToExtract.reset();
-                        mIsSubTableFinished = true;
+                        isSubTableFinished = true;
                     }
                     tableToExtract.initId(cursor, currentColumn);
                     tableToExtract.extractRowValue(cursor, currentColumn);
-                    mIsSubTableFinished = mIsSubTableFinished || tableToExtract.mIsSubTableFinished;
+                    isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
                 }
                 currentColumn += tableToExtract.getNumberOfColumnsQueried();
             }
@@ -761,9 +759,9 @@ public abstract class DBTable<T> extends DBData<T> {
         super.setComplete();
 
         try {
-            for (DBTable<?> tableToExtract : mDBTableQueryList) {
+            for (DBTable<?> tableToExtract : tableQueries) {
                 tableToExtract.setComplete();
-                if (!tableToExtract.mIsGonnaBeRedundant) {
+                if (!tableToExtract.isGonnaBeRedundant) {
                     setValues(tableToExtract);
                 }
                 tableToExtract.setIsGonnaBeRedundant(false, 0);
@@ -771,20 +769,20 @@ public abstract class DBTable<T> extends DBData<T> {
                 tableToExtract.resetList();
             }
         } catch (Exception ex) {
-            throw new DBArchitectureException("Exception caught during the parsing of table " + mTableName + "(alias : " + mDataName + ")", ex);
+            throw new DBArchitectureException("Exception caught during the parsing of table " + tableName + "(alias : " + dataName + ")", ex);
         }
     }
 
     private void setIsGonnaBeRedundant(boolean isRedundant, int cursorPosition) {
-        if (mIsGonnaBeRedundant == isRedundant) {
+        if (isGonnaBeRedundant == isRedundant) {
             return;
         }
-        mIsGonnaBeRedundant = isRedundant;
+        isGonnaBeRedundant = isRedundant;
         if (isRedundant) {
-            mRedundantRows = cursorPosition - mInitRowPosition;
+            redundantRows = cursorPosition - initRowPosition;
         } else {
-            mRedundantRows = 0;
-            for (DBTable<?> table : mDBTableQueryList) {
+            redundantRows = 0;
+            for (DBTable<?> table : tableQueries) {
                 table.setIsGonnaBeRedundant(false, cursorPosition);
             }
         }
@@ -794,22 +792,22 @@ public abstract class DBTable<T> extends DBData<T> {
     protected void reset() {
         super.reset();
         try {
-            // Log.d("POKEMON", "mCurrentObject resetted: " + mTableName);
-            mCurrentObject = mClass.newInstance();
-            for (DBData<?> fieldToReset : mDBTableQueryList) {
+            // Log.d("POKEMON", "mCurrentObject resetted: " + tableName);
+            mCurrentObject = modelClass.newInstance();
+            for (DBData<?> fieldToReset : tableQueries) {
                 fieldToReset.reset();
             }
-            mIds = new DBID();
-            mIsANewObject = true;
-            mIsSubTableFinished = false;
+            ids = new DBID();
+            isANewObject = true;
+            isSubTableFinished = false;
         } catch (Exception e) {
             throw new DBArchitectureException(e);
         }
     }
 
     private void resetList() {
-        mResultList = new ArrayList<>();
-        mInitRowPosition = -1;
+        results = new ArrayList<>();
+        initRowPosition = -1;
     }
 
     private void setValues(DBTable<?> tableToExtract) throws NoSuchFieldException, IllegalAccessException {
@@ -824,12 +822,12 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private void addResultToList() {
         if (mIsComplete) {
-            mResultList.add(mCurrentObject);
+            results.add(mCurrentObject);
         }
     }
 
     private List<T> getResultList() {
-        return mResultList;
+        return results;
     }
 
     /*
@@ -840,8 +838,8 @@ public abstract class DBTable<T> extends DBData<T> {
     public int hashCode() {
         final int prime = 31;
         int result = super.hashCode();
-        result = prime * result + ((mDataName == null) ? 0 : mDataName.hashCode());
-        result = prime * result + ((mTableName == null) ? 0 : mTableName.hashCode());
+        result = prime * result + ((dataName == null) ? 0 : dataName.hashCode());
+        result = prime * result + ((tableName == null) ? 0 : tableName.hashCode());
         return result;
     }
 
@@ -854,15 +852,15 @@ public abstract class DBTable<T> extends DBData<T> {
         if (getClass() != obj.getClass())
             return false;
         DBTable<?> other = (DBTable<?>) obj;
-        if (mDataName == null) {
-            if (other.mDataName != null)
+        if (dataName == null) {
+            if (other.dataName != null)
                 return false;
-        } else if (!mDataName.equals(other.mDataName))
+        } else if (!dataName.equals(other.dataName))
             return false;
-        if (mTableName == null) {
-            if (other.mTableName != null)
+        if (tableName == null) {
+            if (other.tableName != null)
                 return false;
-        } else if (!mTableName.equals(other.mTableName))
+        } else if (!tableName.equals(other.tableName))
             return false;
         return true;
     }

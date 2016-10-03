@@ -17,7 +17,7 @@ public abstract class DBData<T> {
     /**
      * Name of the field to be retrieved
      */
-    protected String mDataName;
+    protected String dataName;
     protected boolean mIsComplete;
     protected T mCurrentObject;
     
@@ -26,7 +26,7 @@ public abstract class DBData<T> {
      * @return The name of this field or table
      */
     public String getDataName(){
-        return mDataName;
+        return dataName;
     }
 
     /**
@@ -76,7 +76,7 @@ public abstract class DBData<T> {
     public int hashCode() {
         final int prime = 31;
         int result = 1;
-        result = prime * result + ((mDataName == null) ? 0 : mDataName.hashCode());
+        result = prime * result + ((dataName == null) ? 0 : dataName.hashCode());
         return result;
     }
 
@@ -89,10 +89,10 @@ public abstract class DBData<T> {
         if (getClass() != obj.getClass())
             return false;
         DBData<?> other = (DBData<?>) obj;
-        if (mDataName == null) {
-            if (other.mDataName != null)
+        if (dataName == null) {
+            if (other.dataName != null)
                 return false;
-        } else if (!mDataName.equals(other.mDataName))
+        } else if (!dataName.equals(other.dataName))
             return false;
         return true;
     }
