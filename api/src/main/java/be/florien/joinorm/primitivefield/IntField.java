@@ -13,7 +13,7 @@ public class IntField extends DBPrimitiveField<Integer> {
 
     @Override
     public void extractRowValue(Cursor cursor, int column) {
-        mCurrentObject = cursor.getInt(column);
+        currentObject = cursor.getInt(column);
         setComplete();
     }
 

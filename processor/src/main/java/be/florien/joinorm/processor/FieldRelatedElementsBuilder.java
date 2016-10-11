@@ -8,7 +8,6 @@ import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -42,6 +41,10 @@ class FieldRelatedElementsBuilder {
     private List<FieldSpec> fields;
     private List<Element> ids;
     private Element fieldElement;
+    private MethodSpec.Builder getFieldValueMethod;
+    private MethodSpec.Builder setFieldValueMethod;
+    private boolean isStartOfGet = true;
+    private boolean isStartOfSet = true;
 
     /**
      * Constructor
@@ -56,6 +59,10 @@ class FieldRelatedElementsBuilder {
         this.methods = new ArrayList<>();
         this.fields = new ArrayList<>();
         this.ids = new ArrayList<>();
+        this.getFieldValueMethod = MethodSpec.methodBuilder("getFieldValue").addAnnotation(Override.class).returns(ClassName.get(Object.class)).addParameter(String.class, "fieldName")
+                .addModifiers(Modifier.PROTECTED);
+        this.setFieldValueMethod = MethodSpec.methodBuilder("setFieldValue").addAnnotation(Override.class).addParameter(String.class, "fieldName").addParameter(TypeName.OBJECT, "value")
+                .addModifiers(Modifier.PROTECTED);
     }
 
     /**
@@ -68,18 +75,20 @@ class FieldRelatedElementsBuilder {
         boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
         String dbTypeName = getTypeName(typeMirror);
         String selectStatementFormat = "select$L($S)";
-        String parameterName = fieldElement.getSimpleName().toString();
+        String fieldName = fieldElement.getSimpleName().toString();
+        String parameterName = fieldName;
         String selectMethodName = snakeToCamel(parameterName);
         selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
         MethodSpec.Builder selectBuilder = MethodSpec.methodBuilder(selectMethodName);
+        TypeName className = null;
+        DeclaredType fieldDeclaredType = null;
 
         if (isId) {
             ids.add(fieldElement);
         }
 
-
         if (dbTypeName.equals(DECLARED_TYPE_NAME)) {
-            DeclaredType fieldDeclaredType = (DeclaredType) fieldElement.asType();
+            fieldDeclaredType = (DeclaredType) typeMirror;
             DeclaredType fieldParameterDeclaredType = ProcessingUtil.getTypeParameterDeclaredType(fieldDeclaredType);
             JoJoin fieldJoinAnnotation = fieldElement.getAnnotation(JoJoin.class);
 
@@ -87,8 +96,6 @@ class FieldRelatedElementsBuilder {
                     (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(String.class)))) {
                 dbTypeName = "String";
             } else if (fieldJoinAnnotation != null) {
-                TypeName className;
-
                 if (isJoinCustomClassDefined(fieldJoinAnnotation)) {
                     className = ClassName.get(getTableClass(fieldJoinAnnotation));
                 } else {
@@ -112,6 +119,16 @@ class FieldRelatedElementsBuilder {
                 messager.printMessage(Diagnostic.Kind.WARNING, "Element class is not comprehensible for the API", fieldElement);
                 return;
             }
+        }
+
+        newConditionForGet(fieldName);
+        getFieldValueMethod.addStatement("return currentObject.$L", fieldName);
+        newConditionForSet(fieldName);
+        if (fieldDeclaredType != null) {
+            setFieldValueMethod.addStatement("currentObject.$L = ($L) value", fieldName, fieldDeclaredType);
+        } else {
+            setFieldValueMethod.addStatement("currentObject.$L = ($L) value", fieldName, dbTypeName.toLowerCase());
+
         }
 
         boolean shouldWriteColumnName = isId;
@@ -142,6 +159,8 @@ class FieldRelatedElementsBuilder {
 
     void addSpecToBuilder(TypeSpec.Builder classBuilder) {
         classBuilder.addMethods(getIdMethods());
+        classBuilder.addMethod(getGetFieldValueMethod());
+        classBuilder.addMethod(getSetFieldValueMethod());
         classBuilder.addMethods(methods);
         classBuilder.addFields(fields);
     }
@@ -253,5 +272,39 @@ class FieldRelatedElementsBuilder {
         }
 
         return columnFieldName;
+    }
+
+    private MethodSpec getGetFieldValueMethod() {
+        if (!isStartOfGet) {
+            getFieldValueMethod.endControlFlow();
+        }
+
+        return getFieldValueMethod.addStatement("return \"\"").build();
+    }
+
+    private MethodSpec getSetFieldValueMethod() {
+        if (!isStartOfSet) {
+            setFieldValueMethod.endControlFlow();
+        }
+
+        return setFieldValueMethod.build();
+    }
+
+    private void newConditionForGet(String elementName) {
+        if (isStartOfGet) {
+            getFieldValueMethod.beginControlFlow("if ($S.equals(fieldName))", elementName);
+            isStartOfGet = false;
+        } else {
+            getFieldValueMethod.nextControlFlow("else if ($S.equals(fieldName))", elementName);
+        }
+    }
+
+    private void newConditionForSet(String elementName) {
+        if (isStartOfSet) {
+            setFieldValueMethod.beginControlFlow("if ($S.equals(fieldName))", elementName);
+            isStartOfSet = false;
+        } else {
+            setFieldValueMethod.nextControlFlow("else if ($S.equals(fieldName))", elementName);
+        }
     }
 }

@@ -18,8 +18,8 @@ public abstract class DBData<T> {
      * Name of the field to be retrieved
      */
     protected String dataName;
-    protected boolean mIsComplete;
-    protected T mCurrentObject;
+    protected boolean isComplete;
+    protected T currentObject;
     
     /**
      * Return the name of this field or table. In case of a DBTable, the dataName could be an alias.
@@ -49,7 +49,7 @@ public abstract class DBData<T> {
      * Notify the table that the parsing of this object is finished
      */
     protected void setComplete() {
-        mIsComplete = true;
+        isComplete = true;
     }
 
     /**
@@ -58,8 +58,8 @@ public abstract class DBData<T> {
      * @return the result of the parsing or null if it's not completed
      */
     public T getValue() {
-        if (mIsComplete) {
-            return mCurrentObject;
+        if (isComplete) {
+            return currentObject;
         }
         return null;
     }
@@ -68,8 +68,8 @@ public abstract class DBData<T> {
      * Reset the current DBData, allowing the parsing of a new Object
      */
     protected void reset() {
-        mCurrentObject = null;
-        mIsComplete = false;
+        currentObject = null;
+        isComplete = false;
     }
 
     @Override

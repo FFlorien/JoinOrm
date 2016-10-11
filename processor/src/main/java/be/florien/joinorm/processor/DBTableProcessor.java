@@ -119,7 +119,16 @@ public class DBTableProcessor extends AbstractProcessor {
 
         currentClassBuilder.addMethod(MethodSpec.constructorBuilder()
                 .addModifiers(Modifier.PUBLIC)
-                .addStatement("super($S, $L.class)", dbName, currentModelElement.getSimpleName())
+                .addStatement("super($S)", dbName)
+                .build());
+
+        ClassName returnType = ClassName.get((TypeElement) currentModelElement);
+        currentClassBuilder.addMethod(MethodSpec
+                .methodBuilder("createNewInstance")
+                .addModifiers(Modifier.PROTECTED)
+                .addAnnotation(Override.class)
+                .returns(returnType)
+                .addStatement("return new $L()", returnType)
                 .build());
     }
 

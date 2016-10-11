@@ -58,7 +58,6 @@ public abstract class DBTable<T> extends DBData<T> {
     private List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
     private List<WhereStatement> wheres = new ArrayList<>();
     private final String tableName;
-    protected final Class<T> modelClass;
 
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private int initRowPosition;
@@ -70,7 +69,6 @@ public abstract class DBTable<T> extends DBData<T> {
     private boolean isANewObject = true;
     private boolean isGonnaBeRedundant = false;
     private boolean isSubTableFinished;
-    private T objectToWrite;
     private int idNumber;
 
     /*
@@ -81,19 +79,15 @@ public abstract class DBTable<T> extends DBData<T> {
      * Constructs a new DBTable. Implementation of this class should do a no-parameters constructor calling this constructor.
      *
      * @param tableName Name of the table as in the database
-     * @param myClass   Class of the result POJO
      */
-    protected DBTable(String tableName, Class<T> myClass) {
+    protected DBTable(String tableName) {
         this.tableName = tableName;
         dataName = tableName;
-        modelClass = myClass;
-        try {
-            objectToWrite = modelClass.newInstance();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        createNewInstance();
         reset();
     }
+
+    protected abstract T createNewInstance();
 
     /**
      * Set an alias for this table. Said alias could be use in case where:
@@ -236,7 +230,7 @@ public abstract class DBTable<T> extends DBData<T> {
         primitiveWrites.remove(stringField);
         primitiveWrites.add(stringField);
         try {
-            getFieldToSet(columnName).set(objectToWrite, value);
+            setFieldValue(columnName, value);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -265,7 +259,7 @@ public abstract class DBTable<T> extends DBData<T> {
         primitiveWrites.remove(boolField);
         primitiveWrites.add(boolField);
         try {
-            getFieldToSet(columnName).set(objectToWrite, bool);
+            setFieldValue(columnName, bool);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -282,7 +276,7 @@ public abstract class DBTable<T> extends DBData<T> {
         primitiveWrites.remove(intField);
         primitiveWrites.add(intField);
         try {
-            getFieldToSet(columnName).set(objectToWrite, integer);
+            setFieldValue(columnName, integer);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -299,7 +293,7 @@ public abstract class DBTable<T> extends DBData<T> {
         primitiveWrites.remove(doubleField);
         primitiveWrites.add(doubleField);
         try {
-            getFieldToSet(columnName).set(objectToWrite, doubleValue);
+            setFieldValue(columnName, doubleValue);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -319,7 +313,7 @@ public abstract class DBTable<T> extends DBData<T> {
         tableValueRefWrites.remove(tableRefValue);
         tableValueRefWrites.add(tableRefValue);
         try {
-            getFieldToSet(tableField).set(objectToWrite, pojoToAssign);
+            setFieldValue(tableRef, pojoToAssign);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -342,16 +336,16 @@ public abstract class DBTable<T> extends DBData<T> {
             }
             for (DBPrimitiveField<?> field : primitiveWrites) {
                 if (field instanceof StringField) {
-                    value.put(field.dataName, (String) getFieldToSet(field).get(objectToWrite));
+                    value.put(field.dataName, (String) getFieldValue(((StringField) field).dataName));
                 } else if (field instanceof DoubleField) {
-                    value.put(field.dataName, (Double) getFieldToSet(field).get(objectToWrite));
+                    value.put(field.dataName, (Double) getFieldValue(((DoubleField) field).dataName));
                 } else if (field instanceof NullField) {
                     value.putNull(field.dataName);
                 } else if (field instanceof BooleanField) {
-                    value.put(field.dataName, (Boolean) getFieldToSet(field).get(objectToWrite));
+                    value.put(field.dataName, (Boolean) getFieldValue(((BooleanField) field).dataName));
                 } else if (field instanceof IntField) {
 
-                    Integer integer = (Integer) getFieldToSet(field).get(objectToWrite);
+                    Integer integer = (Integer) getFieldValue(((IntField) field).dataName);
                     if (field.dataName.equals(reference)) {
                         referenceId = integer;
                     }
@@ -599,6 +593,10 @@ public abstract class DBTable<T> extends DBData<T> {
      * DATA EXTRACTION
      */
 
+    protected abstract void setFieldValue(String fieldName, Object value);
+
+    protected abstract Object getFieldValue(String fieldName);
+
     /**
      * Extract the datas from the Cursor in parameter and return a List of POJO filled with queried fields
      *
@@ -670,33 +668,8 @@ public abstract class DBTable<T> extends DBData<T> {
         return rows;
     }
 
-    /**
-     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the POJO. Retrieve
-     * said field by using the columnName or the alias is one is set. Override this method if you want the POJO's field name and the columnName/alias
-     * to be different.
-     *
-     * @param fieldToSet Representation for retrieving the data from the database. Used to get the POJO field name
-     * @return The Field to be set
-     * @throws NoSuchFieldException
-     */
-    protected Field getFieldToSet(DBData<?> fieldToSet) throws NoSuchFieldException {
-        return getFieldToSet(fieldToSet.dataName);
-    }
-
-    /**
-     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the POJO. Retrieve
-     * said field by using the field to set. Override this method if you want the POJO's field name and fieldToSet to be different.
-     *
-     * @param fieldToSet The POJO field name
-     * @return The Field to be set
-     * @throws NoSuchFieldException
-     */
-    private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        return modelClass.getField(fieldToSet);
-    }
-
     private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
-        Field field = getFieldToSet(dbFieldToExtract);
+        Field field = currentObject.getClass().getField(dbFieldToExtract.dataName);
         Type genericType = field.getGenericType();
         return genericType instanceof ParameterizedType;
     }
@@ -714,8 +687,7 @@ public abstract class DBTable<T> extends DBData<T> {
             if (isANewObject) {
                 for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
                     primitiveToExtract.extractRowValue(cursor, currentColumn);
-                    Field field = getFieldToSet(primitiveToExtract);
-                    field.set(mCurrentObject, primitiveToExtract.getValue());
+                    setFieldValue(primitiveToExtract.dataName, primitiveToExtract.getValue());
                     currentColumn++;
                 }
                 isANewObject = false;
@@ -737,8 +709,7 @@ public abstract class DBTable<T> extends DBData<T> {
                         if (isAList(tableToExtract)) {
                             tableToExtract.addResultToList();
                         } else {
-                            Field field = getFieldToSet(tableToExtract);
-                            field.set(mCurrentObject, tableToExtract.getValue());
+                            setFieldValue(tableToExtract.dataName, tableToExtract.getValue());
                         }
                         tableToExtract.reset();
                         isSubTableFinished = true;
@@ -792,8 +763,8 @@ public abstract class DBTable<T> extends DBData<T> {
     protected void reset() {
         super.reset();
         try {
-            // Log.d("POKEMON", "mCurrentObject resetted: " + tableName);
-            mCurrentObject = modelClass.newInstance();
+            // Log.d("POKEMON", "currentObject resetted: " + tableName);
+            currentObject = createNewInstance();
             for (DBData<?> fieldToReset : tableQueries) {
                 fieldToReset.reset();
             }
@@ -811,18 +782,17 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     private void setValues(DBTable<?> tableToExtract) throws NoSuchFieldException, IllegalAccessException {
-        Field field = getFieldToSet(tableToExtract);
         if (isAList(tableToExtract)) {
             tableToExtract.addResultToList();
-            field.set(mCurrentObject, tableToExtract.getResultList());
+            setFieldValue(tableToExtract.dataName, tableToExtract.getResultList());
         } else {
-            field.set(mCurrentObject, tableToExtract.getValue());
+            setFieldValue(tableToExtract.dataName, tableToExtract.getValue());
         }
     }
 
     private void addResultToList() {
-        if (mIsComplete) {
-            results.add(mCurrentObject);
+        if (isComplete) {
+            results.add(currentObject);
         }
     }
 
