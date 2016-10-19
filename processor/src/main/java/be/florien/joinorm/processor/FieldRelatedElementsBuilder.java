@@ -86,6 +86,15 @@ class FieldRelatedElementsBuilder {
             if (ClassName.get(fieldDeclaredType).equals(ClassName.get(String.class)) ||
                     (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(String.class)))) {
                 dbTypeName = "String";
+            } else if (ClassName.get(fieldDeclaredType).equals(ClassName.get(Integer.class)) ||
+                    (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(Integer.class)))) {
+                dbTypeName = "Int";
+            } else if (ClassName.get(fieldDeclaredType).equals(ClassName.get(Boolean.class)) ||
+                    (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(Boolean.class)))) {
+                dbTypeName = "Boolean";
+            } else if (ClassName.get(fieldDeclaredType).equals(ClassName.get(Double.class)) ||
+                    (fieldParameterDeclaredType != null && ClassName.get(fieldParameterDeclaredType).equals(ClassName.get(Double.class)))) {
+                dbTypeName = "Double";
             } else if (fieldJoinAnnotation != null) {
                 TypeName className;
 
@@ -105,11 +114,11 @@ class FieldRelatedElementsBuilder {
                         selectBuilder.addStatement("$L.setAlias($S)", parameterName, fieldJoinAnnotation.getAlias());
                     }
                 } else {
-                    messager.printMessage(Diagnostic.Kind.ERROR, "Element annotated with JoJoin is not a DBTable", fieldElement);
+                    messager.printMessage(Diagnostic.Kind.ERROR, "Element " + fieldElement.getSimpleName() + " annotated with JoJoin is not a DBTable in " + tableClassName.toString(), fieldElement);
                     return;
                 }
             } else {
-                messager.printMessage(Diagnostic.Kind.WARNING, "Element class is not comprehensible for the API", fieldElement);
+                messager.printMessage(Diagnostic.Kind.WARNING, "Element " + fieldElement.getSimpleName() + " class("+ClassName.get(fieldDeclaredType)+") is not comprehensible for the API in " + tableClassName.toString(), fieldElement);
                 return;
             }
         }
@@ -225,7 +234,7 @@ class FieldRelatedElementsBuilder {
             case DECLARED:
                 return DECLARED_TYPE_NAME;
             default:
-                messager.printMessage(Diagnostic.Kind.ERROR, "Cannot determine the type of element", fieldElement);
+                messager.printMessage(Diagnostic.Kind.ERROR, "Cannot determine the type of element " + fieldElement.getSimpleName() + " in " + tableClassName.toString(), fieldElement);
                 return ERROR_TYPE;
 
         }

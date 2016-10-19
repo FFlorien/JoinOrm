@@ -4,6 +4,7 @@ package be.florien.joinorm.architecture;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.text.TextUtils;
+import android.util.Log;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
@@ -714,8 +715,12 @@ public abstract class DBTable<T> extends DBData<T> {
             if (isANewObject) {
                 for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
                     primitiveToExtract.extractRowValue(cursor, currentColumn);
-                    Field field = getFieldToSet(primitiveToExtract);
-                    field.set(mCurrentObject, primitiveToExtract.getValue());
+                    try {
+                        Field field = getFieldToSet(primitiveToExtract);
+                        field.set(mCurrentObject, primitiveToExtract.getValue());
+                    } catch (NoSuchFieldException exception) {
+                        Log.e("WHAT", "error extracting a value in table "+ dataName, exception);
+                    }
                     currentColumn++;
                 }
                 isANewObject = false;

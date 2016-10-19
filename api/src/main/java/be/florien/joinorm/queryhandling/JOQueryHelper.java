@@ -4,6 +4,7 @@ package be.florien.joinorm.queryhandling;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
+import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,6 +29,9 @@ public class JOQueryHelper {
             query.setTables(table.getJoinComplete());
             Cursor cursor = query.query(mDBHelper.getReadableDatabase(), table.getProjection(), table.getWhere(), null, null, null, table.getOrderBy());
             return table.getResult(cursor);
+        } catch (Exception what) {
+            Log.e("WHAT", what.getMessage());
+            throw what;
         } finally {
             mDBHelper.close();
         }
