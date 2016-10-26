@@ -45,6 +45,7 @@ import be.florien.joinorm.primitivefield.StringField;
  * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
+    public static final int ALL_ITEMS = -20;
 
     /*
      * FIELDS
@@ -73,6 +74,7 @@ public abstract class DBTable<T> extends DBData<T> {
     private boolean isSubTableFinished;
     private T objectToWrite;
     private int idNumber;
+    private int lastOffset = 0;
 
     /*
      * CONSTRUCTOR
@@ -607,13 +609,18 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return a List of POJO
      */
     public List<T> getResult(Cursor cursor) {
-        cursor.moveToFirst();
+        return getResult(cursor, ALL_ITEMS);
+    }
+
+    public List<T> getResult(Cursor cursor, int nbItem) {
+        cursor.moveToPosition(lastOffset);
+        int itemParsed = 0;
         if (!cursor.isAfterLast()) {
             initId(cursor, 0);
         } else {
             return new ArrayList<>();
         }
-        while (!cursor.isAfterLast()) {
+        while (!cursor.isAfterLast() && (nbItem == ALL_ITEMS || itemParsed < nbItem)) {
             if (compareIDs(cursor, 0)) {
                 extractRowValue(cursor, 0);
                 int rowToFinishParsing = getRowToFinishParsing();
@@ -626,9 +633,11 @@ public abstract class DBTable<T> extends DBData<T> {
                 addResultToList();
                 reset();
                 initId(cursor, 0);
+                itemParsed++;
             }
 
         }
+        this.lastOffset = cursor.getPosition();
         setComplete();
         addResultToList();
         return getResultList();

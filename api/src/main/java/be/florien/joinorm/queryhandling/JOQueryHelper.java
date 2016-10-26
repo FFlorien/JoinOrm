@@ -37,6 +37,20 @@ public class JOQueryHelper {
         }
     }
 
+    public <E> List<E> queryList(DBTable<E> table, int nbItem) {
+        try {
+            SQLiteQueryBuilder query = new SQLiteQueryBuilder();
+            query.setTables(table.getJoinComplete());
+            Cursor cursor = query.query(mDBHelper.getReadableDatabase(), table.getProjection(), table.getWhere(), null, null, null, table.getOrderBy());
+            return table.getResult(cursor, nbItem);
+        } catch (Exception what) {
+            Log.e("WHAT", what.getMessage());
+            throw what;
+        } finally {
+            mDBHelper.close();
+        }
+    }
+
     public int queryInt(String projection, String tables, String where, String orderBy) {
         SQLiteQueryBuilder query = new SQLiteQueryBuilder();
         String projections[] = new String[1];
