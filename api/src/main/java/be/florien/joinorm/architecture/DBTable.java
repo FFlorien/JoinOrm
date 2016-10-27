@@ -618,8 +618,16 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem) {
+        return getResult(openHelper, nbItem, false);
+    }
+
+    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem, boolean isReturningAllList) {
         if (openHelper == null) {
             throw new NullPointerException("Please provide an initialized SQLiteOpenHelper");
+        }
+
+        if (!isReturningAllList) {
+            resetList();
         }
 
         if (cursor == null) {

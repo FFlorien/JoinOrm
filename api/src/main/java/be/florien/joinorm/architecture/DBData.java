@@ -25,7 +25,7 @@ public abstract class DBData<T> {
      * Return the name of this field or table. In case of a DBTable, the dataName could be an alias.
      * @return The name of this field or table
      */
-    protected String getDataName(){
+    public String getDataName(){
         return dataName;
     }
 
