@@ -67,7 +67,7 @@ public abstract class DBData<T> {
     /**
      * Reset the current DBData, allowing the parsing of a new Object
      */
-    protected void reset() {
+    protected void resetCurrentParsing() {
         mCurrentObject = null;
         mIsComplete = false;
     }

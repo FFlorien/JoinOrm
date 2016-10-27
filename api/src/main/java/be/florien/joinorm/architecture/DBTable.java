@@ -3,6 +3,8 @@ package be.florien.joinorm.architecture;
 
 import android.content.ContentValues;
 import android.database.Cursor;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.database.sqlite.SQLiteQueryBuilder;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -74,7 +76,7 @@ public abstract class DBTable<T> extends DBData<T> {
     private boolean isSubTableFinished;
     private T objectToWrite;
     private int idNumber;
-    private int lastOffset = 0;
+    private Cursor cursor = null;
 
     /*
      * CONSTRUCTOR
@@ -95,7 +97,7 @@ public abstract class DBTable<T> extends DBData<T> {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        reset();
+        resetCurrentParsing();
     }
 
     /**
@@ -602,23 +604,48 @@ public abstract class DBTable<T> extends DBData<T> {
      * DATA EXTRACTION
      */
 
+    public void resetTable() { //todo bettername ?
+        resetList();
+        cursor = null;
+    }
+
+    public boolean hasMoreResults() {
+        return cursor != null && !cursor.isAfterLast();
+    }
+
+    public List<T> getResult(SQLiteOpenHelper openHelper) {
+        return getResult(openHelper, ALL_ITEMS);
+    }
+
+    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem) {
+        if (openHelper == null) {
+            throw new NullPointerException("Please provide an initialized SQLiteOpenHelper");
+        }
+
+        if (cursor == null) {
+            SQLiteQueryBuilder query = new SQLiteQueryBuilder();
+            query.setTables(getJoinComplete());
+            cursor = query.query(openHelper.getReadableDatabase(), getProjection(), getWhere(), null, null, null, getOrderBy());
+        }
+
+        return getResult(cursor, nbItem);
+    }
+
     /**
      * Extract the datas from the Cursor in parameter and return a List of POJO filled with queried fields
      *
      * @param cursor The cursor which has received the datas from the database.
      * @return a List of POJO
      */
-    public List<T> getResult(Cursor cursor) {
-        return getResult(cursor, ALL_ITEMS);
-    }
-
-    public List<T> getResult(Cursor cursor, int nbItem) {
-        cursor.moveToPosition(lastOffset);
+    private List<T> getResult(Cursor cursor, int nbItem) {
+        if (cursor.isBeforeFirst()) {
+            cursor.moveToFirst();
+        }
         int itemParsed = 0;
         if (!cursor.isAfterLast()) {
             initId(cursor, 0);
         } else {
-            return new ArrayList<>();
+            return getResultList();
         }
         while (!cursor.isAfterLast() && (nbItem == ALL_ITEMS || itemParsed < nbItem)) {
             if (compareIDs(cursor, 0)) {
@@ -631,15 +658,16 @@ public abstract class DBTable<T> extends DBData<T> {
             } else {
                 setComplete();
                 addResultToList();
-                reset();
+                resetCurrentParsing();
                 initId(cursor, 0);
                 itemParsed++;
             }
 
         }
-        this.lastOffset = cursor.getPosition();
-        setComplete();
-        addResultToList();
+        if (cursor.isAfterLast()) {
+            setComplete();
+            addResultToList();
+        }
         return getResultList();
     }
 
@@ -742,7 +770,7 @@ public abstract class DBTable<T> extends DBData<T> {
                     tableToExtract.setComplete();
                     tableToExtract.setIsGonnaBeRedundant(true, cursor.getPosition());
                     setValues(tableToExtract);
-                    tableToExtract.reset();
+                    tableToExtract.resetCurrentParsing();
                     tableToExtract.initId(cursor, currentColumn);
                     tableToExtract.extractRowValue(cursor, currentColumn);
                 } else if (!tableToExtract.isGonnaBeRedundant) {
@@ -754,7 +782,7 @@ public abstract class DBTable<T> extends DBData<T> {
                             Field field = getFieldToSet(tableToExtract);
                             field.set(mCurrentObject, tableToExtract.getValue());
                         }
-                        tableToExtract.reset();
+                        tableToExtract.resetCurrentParsing();
                         isSubTableFinished = true;
                     }
                     tableToExtract.initId(cursor, currentColumn);
@@ -779,7 +807,7 @@ public abstract class DBTable<T> extends DBData<T> {
                     setValues(tableToExtract);
                 }
                 tableToExtract.setIsGonnaBeRedundant(false, 0);
-                tableToExtract.reset();
+                tableToExtract.resetCurrentParsing();
                 tableToExtract.resetList();
             }
         } catch (Exception ex) {
@@ -803,13 +831,13 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     @Override
-    protected void reset() {
-        super.reset();
+    protected void resetCurrentParsing() {
+        super.resetCurrentParsing();
         try {
             // Log.d("POKEMON", "mCurrentObject resetted: " + tableName);
             mCurrentObject = modelClass.newInstance();
             for (DBData<?> fieldToReset : tableQueries) {
-                fieldToReset.reset();
+                fieldToReset.resetCurrentParsing();
             }
             ids = new DBID();
             isANewObject = true;
