@@ -53,29 +53,29 @@ public abstract class DBTable<T> extends DBData<T> {
      * FIELDS
      */
 
+    private List<DBTable<?>> tableWrites = new ArrayList<>();
+    private List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
+    private List<String> tableNameWrites = new ArrayList<>();
+    private List<String> tableValueRefWrites = new ArrayList<>();
     private List<DBTable<?>> tableQueries = new ArrayList<>();
     private List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
     private List<DBID> deleteIds = new ArrayList<>();
-    private List<String> tableNameWrites = new ArrayList<>();
-    private List<String> tableValueRefWrites = new ArrayList<>();
-    private List<DBTable<?>> tableWrites = new ArrayList<>();
-    private List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
     private List<WhereStatement> wheres = new ArrayList<>();
-    private final String tableName;
-    protected final Class<T> modelClass;
 
+    private final String tableName;
+    protected final Class<T> pojoClass;
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private int initRowPosition;
     private int redundantRows;
-
-    private int numberOfColumnQueried = -1;
-    private List<T> results = new ArrayList<>();
-    private DBID ids = new DBID();
+    private int columnQueriedCount = -1;
+    private boolean willBeRedundant = false;
     private boolean isANewObject = true;
-    private boolean isGonnaBeRedundant = false;
     private boolean isSubTableFinished;
+
     private T objectToWrite;
-    private int idNumber;
+    private DBID ids = new DBID();
+    private List<T> results = new ArrayList<>();
+    private int idColumnCount;
     private Cursor cursor = null;
 
     /*
@@ -91,9 +91,9 @@ public abstract class DBTable<T> extends DBData<T> {
     protected DBTable(String tableName, Class<T> myClass) {
         this.tableName = tableName;
         dataName = tableName;
-        modelClass = myClass;
+        pojoClass = myClass;
         try {
-            objectToWrite = modelClass.newInstance();
+            objectToWrite = pojoClass.newInstance();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -130,7 +130,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param columnNames The names of the field as in the database's table
      */
     protected void selectId(String... columnNames) {
-        idNumber = columnNames.length;
+        idColumnCount = columnNames.length;
         for (int position = 0; position < columnNames.length; position++) {
             String columnName = columnNames[position];
             IntField intField = new IntField(columnName);
@@ -402,13 +402,13 @@ public abstract class DBTable<T> extends DBData<T> {
      * Used to know how many columns has been read by this parser
      */
     private int getNumberOfColumnsQueried() {
-        if (numberOfColumnQueried == -1) {
-            numberOfColumnQueried = primitiveQueries.size();
+        if (columnQueriedCount == -1) {
+            columnQueriedCount = primitiveQueries.size();
             for (DBTable<?> field : tableQueries) {
-                numberOfColumnQueried += field.getNumberOfColumnsQueried();
+                columnQueriedCount += field.getNumberOfColumnsQueried();
             }
         }
-        return numberOfColumnQueried;
+        return columnQueriedCount;
     }
 
     /*
@@ -680,7 +680,7 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     private void initId(Cursor cursor, int column) {
-        for (int offset = 0; offset < idNumber; offset++) {
+        for (int offset = 0; offset < idColumnCount; offset++) {
             ids.getIds().add(String.valueOf(cursor.getInt(column + offset)));
         }
     }
@@ -689,7 +689,7 @@ public abstract class DBTable<T> extends DBData<T> {
         if (ids.getIds().size() < 1) {
             return true;
         }
-        for (int offset = 0; offset < idNumber; offset++) {
+        for (int offset = 0; offset < idColumnCount; offset++) {
             if (!ids.getIds().get(offset).equals(String.valueOf(cursor.getInt(column + offset)))) {
                 return false;
             }
@@ -704,7 +704,7 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     private int getRowToFinishParsing() {
         int rows;
-        if (!isGonnaBeRedundant) {
+        if (!willBeRedundant) {
             rows = 1;
             for (DBTable<?> table : tableQueries) {
                 int rowToFinishParsing = table.getRowToFinishParsing();
@@ -738,7 +738,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @throws NoSuchFieldException
      */
     private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        return modelClass.getField(fieldToSet);
+        return pojoClass.getField(fieldToSet);
     }
 
     private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
@@ -774,14 +774,14 @@ public abstract class DBTable<T> extends DBData<T> {
             }
 
             for (DBTable<?> tableToExtract : tableQueries) {
-                if (isSubTableFinished && !tableToExtract.isGonnaBeRedundant) {
+                if (isSubTableFinished && !tableToExtract.willBeRedundant) {
                     tableToExtract.setComplete();
                     tableToExtract.setIsGonnaBeRedundant(true, cursor.getPosition());
                     setValues(tableToExtract);
                     tableToExtract.resetCurrentParsing();
                     tableToExtract.initId(cursor, currentColumn);
                     tableToExtract.extractRowValue(cursor, currentColumn);
-                } else if (!tableToExtract.isGonnaBeRedundant) {
+                } else if (!tableToExtract.willBeRedundant) {
                     if (!tableToExtract.compareIDs(cursor, currentColumn)) {
                         tableToExtract.setComplete();
                         if (isAList(tableToExtract)) {
@@ -811,7 +811,7 @@ public abstract class DBTable<T> extends DBData<T> {
         try {
             for (DBTable<?> tableToExtract : tableQueries) {
                 tableToExtract.setComplete();
-                if (!tableToExtract.isGonnaBeRedundant) {
+                if (!tableToExtract.willBeRedundant) {
                     setValues(tableToExtract);
                 }
                 tableToExtract.setIsGonnaBeRedundant(false, 0);
@@ -824,10 +824,10 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     private void setIsGonnaBeRedundant(boolean isRedundant, int cursorPosition) {
-        if (isGonnaBeRedundant == isRedundant) {
+        if (willBeRedundant == isRedundant) {
             return;
         }
-        isGonnaBeRedundant = isRedundant;
+        willBeRedundant = isRedundant;
         if (isRedundant) {
             redundantRows = cursorPosition - initRowPosition;
         } else {
@@ -843,7 +843,7 @@ public abstract class DBTable<T> extends DBData<T> {
         super.resetCurrentParsing();
         try {
             // Log.d("POKEMON", "currentObject resetted: " + tableName);
-            currentObject = modelClass.newInstance();
+            currentObject = pojoClass.newInstance();
             for (DBData<?> fieldToReset : tableQueries) {
                 fieldToReset.resetCurrentParsing();
             }
