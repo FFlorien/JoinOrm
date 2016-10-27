@@ -13,7 +13,7 @@ public class DoubleField extends DBPrimitiveField<Double> {
 
     @Override
     public void extractRowValue(Cursor cursor, int column) {
-        mCurrentObject = cursor.getDouble(column);
+        currentObject = cursor.getDouble(column);
         setComplete();
     }
 

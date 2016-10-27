@@ -13,7 +13,7 @@ public class StringField extends DBPrimitiveField<String> {
 
     @Override
     public void extractRowValue(Cursor cursor, int column) {
-        mCurrentObject = cursor.getString(column);
+        currentObject = cursor.getString(column);
         setComplete();
     }
 

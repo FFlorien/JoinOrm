@@ -12,7 +12,7 @@ public class NullField extends DBPrimitiveField<Void> {
 
     @Override
     protected void extractRowValue(Cursor cursor, int column) {
-        mCurrentObject = null;
+        currentObject = null;
         setComplete();
     }
 

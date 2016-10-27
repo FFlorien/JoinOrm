@@ -754,7 +754,7 @@ public abstract class DBTable<T> extends DBData<T> {
                     primitiveToExtract.extractRowValue(cursor, currentColumn);
                     try {
                         Field field = getFieldToSet(primitiveToExtract);
-                        field.set(mCurrentObject, primitiveToExtract.getValue());
+                        field.set(currentObject, primitiveToExtract.getValue());
                     } catch (NoSuchFieldException exception) {
                         Log.e("WHAT", "error extracting a value in table "+ dataName, exception);
                     }
@@ -780,7 +780,7 @@ public abstract class DBTable<T> extends DBData<T> {
                             tableToExtract.addResultToList();
                         } else {
                             Field field = getFieldToSet(tableToExtract);
-                            field.set(mCurrentObject, tableToExtract.getValue());
+                            field.set(currentObject, tableToExtract.getValue());
                         }
                         tableToExtract.resetCurrentParsing();
                         isSubTableFinished = true;
@@ -834,8 +834,8 @@ public abstract class DBTable<T> extends DBData<T> {
     protected void resetCurrentParsing() {
         super.resetCurrentParsing();
         try {
-            // Log.d("POKEMON", "mCurrentObject resetted: " + tableName);
-            mCurrentObject = modelClass.newInstance();
+            // Log.d("POKEMON", "currentObject resetted: " + tableName);
+            currentObject = modelClass.newInstance();
             for (DBData<?> fieldToReset : tableQueries) {
                 fieldToReset.resetCurrentParsing();
             }
@@ -856,15 +856,15 @@ public abstract class DBTable<T> extends DBData<T> {
         Field field = getFieldToSet(tableToExtract);
         if (isAList(tableToExtract)) {
             tableToExtract.addResultToList();
-            field.set(mCurrentObject, tableToExtract.getResultList());
+            field.set(currentObject, tableToExtract.getResultList());
         } else {
-            field.set(mCurrentObject, tableToExtract.getValue());
+            field.set(currentObject, tableToExtract.getValue());
         }
     }
 
     private void addResultToList() {
-        if (mIsComplete) {
-            results.add(mCurrentObject);
+        if (isComplete) {
+            results.add(currentObject);
         }
     }
 
