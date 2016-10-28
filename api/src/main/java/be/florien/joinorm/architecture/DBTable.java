@@ -47,7 +47,7 @@ import be.florien.joinorm.primitivefield.StringField;
  * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
-    //todo reorganize methods by accessibility / overriding role
+    //todo when repeatable, dont query repeatable.id but the foreign key, and don't join the table
     /*
      * CONSTANTS
      */
@@ -66,6 +66,9 @@ public abstract class DBTable<T> extends DBData<T> {
     private final List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
     private final List<DbId> deleteIds = new ArrayList<>();
     private final List<WhereStatement> wheres = new ArrayList<>();
+    private final List<DbId> repeatableIds = new ArrayList<>();
+    private List<T> repeatableResults = new ArrayList<>();
+    private T repeatableResult = null;
 
     private final String tableName;
     protected final Class<T> modelObjectClass;
@@ -76,12 +79,14 @@ public abstract class DBTable<T> extends DBData<T> {
     private int idColumnCount;
     private boolean willBeRedundant = false;
     private boolean isANewObject = true;
+    private boolean isRepeatable = false;
 
     private boolean isSubTableFinished;
     private T objectToWrite;
     private DbId ids = new DbId();
     private List<T> results = new ArrayList<>();
     private Cursor cursor = null;
+    private boolean repeatableInitiated = false;
 
     /*
      * CONSTRUCTOR
@@ -133,8 +138,12 @@ public abstract class DBTable<T> extends DBData<T> {
         for (DBData<?> fieldToSelect : primitiveQueries) {
             projection.addAll(fieldToSelect.buildSelect(dataName));
         }
-        for (DBData<?> fieldToSelect : tableQueries) {
-            projection.addAll(fieldToSelect.buildSelect(dataName));
+        for (DBTable<?> fieldToSelect : tableQueries) {
+            if (fieldToSelect.isRepeatable) {
+                projection.addAll(fieldToSelect.getCompleteId());
+            } else {
+                projection.addAll(fieldToSelect.buildSelect(dataName));
+            }
         }
         return projection;
     }
@@ -150,50 +159,75 @@ public abstract class DBTable<T> extends DBData<T> {
             int currentColumn = column;
 
             if (isANewObject) {
+                DbId id = new DbId();
                 for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
                     primitiveToExtract.extractRowValue(cursor, currentColumn);
                     try {
                         Field field = getFieldToSet(primitiveToExtract);
                         field.set(currentObject, primitiveToExtract.getValue());
+                        if (id.getIds().size() < idColumnCount) {
+                            id.getIds().add(String.valueOf(primitiveToExtract.getValue()));
+                        }
                     } catch (NoSuchFieldException exception) {
                         Log.e("WHAT", "error extracting a value in table " + dataName, exception);
                     }
                     currentColumn++;
                 }
+                repeatableIds.add(id);
                 isANewObject = false;
             } else {
                 currentColumn += primitiveQueries.size();
             }
 
             for (DBTable<?> tableToExtract : tableQueries) {
-                if (isSubTableFinished && !tableToExtract.willBeRedundant) {
-                    tableToExtract.setComplete();
-                    tableToExtract.setWillBeRedundant(true, cursor.getPosition());
-                    setValues(tableToExtract);
-                    tableToExtract.resetCurrentParsing();
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                } else if (!tableToExtract.willBeRedundant) {
-                    if (!tableToExtract.compareIDs(cursor, currentColumn)) {
+                if (tableToExtract.isRepeatable) {
+                    setValues(tableToExtract);//todo assign the correct object
+                    initValuesFromRepeatable(cursor, tableToExtract, currentColumn);
+                    currentColumn += tableToExtract.idColumnCount;
+                } else {
+                    if (isSubTableFinished && !tableToExtract.willBeRedundant) {
                         tableToExtract.setComplete();
-                        if (isAList(tableToExtract)) {
-                            tableToExtract.addResultToList();
-                        } else {
-                            Field field = getFieldToSet(tableToExtract);
-                            field.set(currentObject, tableToExtract.getValue());
-                        }
+                        tableToExtract.setWillBeRedundant(true, cursor.getPosition());
+                        setValues(tableToExtract);
                         tableToExtract.resetCurrentParsing();
-                        isSubTableFinished = true;
+                        tableToExtract.initId(cursor, currentColumn);
+                        tableToExtract.extractRowValue(cursor, currentColumn);
+                    } else if (!tableToExtract.willBeRedundant) {
+                        if (!tableToExtract.compareIDs(cursor, currentColumn)) {
+                            tableToExtract.setComplete();
+                            if (isAList(tableToExtract)) {
+                                tableToExtract.addResultToList();
+                            } else {
+                                Field field = getFieldToSet(tableToExtract);
+                                field.set(currentObject, tableToExtract.getValue());
+                            }
+                            tableToExtract.resetCurrentParsing();
+                            isSubTableFinished = true;
+                        }
+                        tableToExtract.initId(cursor, currentColumn);
+                        tableToExtract.extractRowValue(cursor, currentColumn);
+                        isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
                     }
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                    isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
+                    currentColumn += tableToExtract.getNumberOfColumnsQueried();
                 }
-                currentColumn += tableToExtract.getNumberOfColumnsQueried();
             }
         } catch (Exception ex) {
             throw new DBArchitectureException(ex);
         }
+    }
+
+    private void initValuesFromRepeatable(Cursor cursor, DBTable<?> tableToExtract, int column) {
+        DbId id = new DbId();
+        for (int offset = 0; offset < tableToExtract.idColumnCount; offset++) {
+            id.getIds().add(String.valueOf(cursor.getInt(column + offset)));
+        }
+        tableToExtract.initRepeatableResult(id);
+    }
+
+    private void initRepeatableResult(DbId id) {
+        int position = repeatableIds.indexOf(id);
+        repeatableResult = results.get(position);
+        repeatableResults.add(results.get(position));
     }
 
     @Override
@@ -202,16 +236,42 @@ public abstract class DBTable<T> extends DBData<T> {
 
         try {
             for (DBTable<?> tableToExtract : tableQueries) {
-                tableToExtract.setComplete();
-                if (!tableToExtract.willBeRedundant) {
-                    setValues(tableToExtract);
+                if (tableToExtract.isRepeatable) {
+                    setRepeatableValues(tableToExtract);
+                    tableToExtract.resetRepeatable();
+                } else {
+                    tableToExtract.setComplete();
+                    if (!tableToExtract.willBeRedundant) {
+                        setValues(tableToExtract);
+                    }
+                    tableToExtract.setWillBeRedundant(false, 0);
+                    tableToExtract.resetCurrentParsing();
+                    tableToExtract.resetList();
                 }
-                tableToExtract.setWillBeRedundant(false, 0);
-                tableToExtract.resetCurrentParsing();
-                tableToExtract.resetList();
             }
         } catch (Exception ex) {
             throw new DBArchitectureException("Exception caught during the parsing of table " + tableName + "(alias : " + dataName + ")", ex);
+        }
+    }
+
+    private void resetRepeatable() {
+        repeatableResult = null;
+        repeatableResults = new ArrayList<>();
+    }
+
+    private void setRepeatableValues(DBTable<?> tableToExtract) {
+
+        try {
+            Field field = getFieldToSet(tableToExtract);
+            if (isAList(tableToExtract)) {
+                field.set(currentObject, tableToExtract.repeatableResults);
+            } else {
+                field.set(currentObject, tableToExtract.repeatableResult);
+            }
+        } catch (NoSuchFieldException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
         }
     }
 
@@ -234,6 +294,11 @@ public abstract class DBTable<T> extends DBData<T> {
     /*
      * PUBLIC METHODS
      */
+
+    public DBTable<T> setRepeatable() {
+        isRepeatable = true;
+        return this;
+    }
 
     /**
      * Add a statement to add to a collection of WhereStatement
@@ -290,12 +355,26 @@ public abstract class DBTable<T> extends DBData<T> {
         }
 
         if (cursor == null) {
+            if (!repeatableInitiated) {
+                initRepeatable(openHelper);
+            }
             SQLiteQueryBuilder query = new SQLiteQueryBuilder();
             query.setTables(getJoinComplete());
             cursor = query.query(openHelper.getReadableDatabase(), getSelect(), getWhere(), null, null, null, getOrderBy());
+            Log.d("PKMN", query.buildQuery(getSelect(), getWhere(), null, null, getOrderBy(), null));
         }
 
         return getResult(cursor, nbItem);
+    }
+
+    private void initRepeatable(SQLiteOpenHelper openHelper) {
+        repeatableInitiated = true;
+        for (DBTable<?> table : tableQueries) {
+            table.initRepeatable(openHelper);
+        }
+        if (isRepeatable) {
+            getResult(openHelper);
+        }
     }
 
     /**
@@ -844,9 +923,13 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     private int getNumberOfColumnsQueried() {
         if (columnQueriedCount == -1) {
-            columnQueriedCount = primitiveQueries.size();
-            for (DBTable<?> field : tableQueries) {
-                columnQueriedCount += field.getNumberOfColumnsQueried();
+            if (isRepeatable && cursor == null) {
+                return idColumnCount;
+            } else {
+                columnQueriedCount = primitiveQueries.size();
+                for (DBTable<?> field : tableQueries) {
+                    columnQueriedCount += field.getNumberOfColumnsQueried();
+                }
             }
         }
         return columnQueriedCount;
@@ -970,7 +1053,7 @@ public abstract class DBTable<T> extends DBData<T> {
             redundantRows = cursorPosition - initRowPosition;
         } else {
             redundantRows = 0;
-            for (DBTable<?> table : tableQueries) {
+            for (DBTable<?> table : tableQueries) { //todo what about repeatable ?
                 table.setWillBeRedundant(false, cursorPosition);
             }
         }
