@@ -11,7 +11,7 @@ public abstract class DBPrimitiveField<T> extends DBData<T> {
     }
 
     @Override
-    public List<String> buildProjection(String tableName) {
+    public List<String> buildSelect(String tableName) {
         List<String> projection = new ArrayList<String>();
         projection.add(tableName + "." + dataName);
         return projection;

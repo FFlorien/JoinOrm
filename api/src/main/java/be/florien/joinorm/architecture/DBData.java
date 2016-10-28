@@ -43,7 +43,7 @@ public abstract class DBData<T> {
      * @param tableName Name of the table containing the field
      * @return a list of fields' names to be retrieved
      */
-    protected abstract List<String> buildProjection(String tableName);
+    protected abstract List<String> buildSelect(String tableName);
 
     /**
      * Notify the table that the parsing of this object is finished

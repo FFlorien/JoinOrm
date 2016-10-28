@@ -8,7 +8,6 @@ import com.squareup.javapoet.ParameterizedTypeName;
 import com.squareup.javapoet.TypeName;
 import com.squareup.javapoet.TypeSpec;
 
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -67,7 +66,7 @@ class FieldRelatedElementsBuilder {
         TypeMirror typeMirror = fieldElement.asType();
         boolean isId = (fieldElement.getAnnotation(JoId.class) != null);
         String dbTypeName = getTypeName(typeMirror);
-        String selectStatementFormat = "select$L($S)";
+        String alias = JoJoin.IGNORE;
         String parameterName = fieldElement.getSimpleName().toString();
         String selectMethodName = snakeToCamel(parameterName);
         selectMethodName = "select" + selectMethodName.substring(0, 1).toUpperCase() + selectMethodName.substring(1);
@@ -106,13 +105,9 @@ class FieldRelatedElementsBuilder {
 
                 if (className != null) {
                     dbTypeName = "Table";
-                    selectStatementFormat = "select$L($L)";
+                    alias = fieldJoinAnnotation.getAlias();
                     parameterName = snakeToCamel(parameterName);
                     selectBuilder.addParameter(ParameterSpec.builder(className, parameterName).build());
-
-                    if (!fieldJoinAnnotation.getAlias().equals(JoJoin.IGNORE)) {
-                        selectBuilder.addStatement("$L.setAlias($S)", parameterName, fieldJoinAnnotation.getAlias());
-                    }
                 } else {
                     messager.printMessage(Diagnostic.Kind.ERROR, "Element " + fieldElement.getSimpleName() + " annotated with JoJoin is not a DBTable in " + tableClassName.toString(), fieldElement);
                     return;
@@ -136,9 +131,16 @@ class FieldRelatedElementsBuilder {
         }
 
         if (isGeneratingSelect && !isId) {
-            methods.add(selectBuilder.returns(tableClassName)
-                    .addModifiers(Modifier.PUBLIC)
-                    .addStatement(selectStatementFormat, dbTypeName, parameterName)
+            MethodSpec.Builder builder = selectBuilder.returns(tableClassName)
+                    .addModifiers(Modifier.PUBLIC);
+            if (!alias.equals(JoJoin.IGNORE)) {
+                builder.addStatement("select$L($L, $S)", dbTypeName, parameterName, alias);
+            } else if (dbTypeName.equals("Table")) {
+                builder.addStatement("select$L($L)", dbTypeName, parameterName);
+            } else {
+                builder.addStatement("select$L($S)", dbTypeName, parameterName);
+            }
+            methods.add(builder
                     .addStatement("return this")
                     .build());
             shouldWriteColumnName = true;

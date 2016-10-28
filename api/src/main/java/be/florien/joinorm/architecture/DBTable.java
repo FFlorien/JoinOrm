@@ -36,46 +36,51 @@ import be.florien.joinorm.primitivefield.StringField;
  * {@link be.florien.joinorm.architecture.DBTable#getJoinOnId(DBTable, boolean, String...) getJoinOnId} or
  * {@link be.florien.joinorm.architecture.DBTable#getJoinOnRef(DBTable, boolean, String...) getJoinOnRef}</li>
  * </ul>
- * <strong>PLEASE BE CAREFUL</strong> The POJO T, result of the conversion, must have its fields'names corresponding exactly to one of the following:
+ * <strong>PLEASE BE CAREFUL</strong> The model object T, result of the conversion, must have its fields'names corresponding exactly to one of the following:
  * <ul>
  * <li>the names of the table field
- * <li>the other table's name if the object's field is another POJO created from database
+ * <li>the other table's name if the object's field is another model object created from database
  * <li>the alias specified for this parser by {@link be.florien.joinorm.architecture.DBTable#setAlias(String) setAlias}
  * </ul>
  *
- * @param <T> POJO representing the table, which will get the info from the database at the end of the parsing
+ * @param <T> model object representing the table, which will get the info from the database at the end of the parsing
  * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
-    public static final int ALL_ITEMS = -20;
+    //todo reorganize methods by accessibility / overriding role
+    /*
+     * CONSTANTS
+     */
+
+    private static final int QUERY_ALL_ITEMS = -20;
 
     /*
      * FIELDS
      */
 
-    private List<DBTable<?>> tableWrites = new ArrayList<>();
-    private List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
-    private List<String> tableNameWrites = new ArrayList<>();
-    private List<String> tableValueRefWrites = new ArrayList<>();
-    private List<DBTable<?>> tableQueries = new ArrayList<>();
-    private List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
-    private List<DBID> deleteIds = new ArrayList<>();
-    private List<WhereStatement> wheres = new ArrayList<>();
+    private final List<DBTable<?>> tableWrites = new ArrayList<>();
+    private final List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
+    private final List<String> tableNameWrites = new ArrayList<>();
+    private final List<String> tableValueRefWrites = new ArrayList<>();
+    private final List<DBTable<?>> tableQueries = new ArrayList<>();
+    private final List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
+    private final List<DbId> deleteIds = new ArrayList<>();
+    private final List<WhereStatement> wheres = new ArrayList<>();
 
     private final String tableName;
-    protected final Class<T> pojoClass;
+    protected final Class<T> modelObjectClass;
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private int initRowPosition;
     private int redundantRows;
     private int columnQueriedCount = -1;
+    private int idColumnCount;
     private boolean willBeRedundant = false;
     private boolean isANewObject = true;
-    private boolean isSubTableFinished;
 
+    private boolean isSubTableFinished;
     private T objectToWrite;
-    private DBID ids = new DBID();
+    private DbId ids = new DbId();
     private List<T> results = new ArrayList<>();
-    private int idColumnCount;
     private Cursor cursor = null;
 
     /*
@@ -85,36 +90,23 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Constructs a new DBTable. Implementation of this class should do a no-parameters constructor calling this constructor.
      *
-     * @param tableName Name of the table as in the database
-     * @param myClass   Class of the result POJO
+     * @param tableName  Name of the table as in the database
+     * @param modelClass Class of the result model object
      */
-    protected DBTable(String tableName, Class<T> myClass) {
+    protected DBTable(String tableName, Class<T> modelClass) {
         this.tableName = tableName;
         dataName = tableName;
-        pojoClass = myClass;
+        modelObjectClass = modelClass;
         try {
-            objectToWrite = pojoClass.newInstance();
+            objectToWrite = modelObjectClass.newInstance();
         } catch (Exception e) {
             e.printStackTrace();
         }
         resetCurrentParsing();
     }
 
-    /**
-     * Set an alias for this table. Said alias could be use in case where:
-     * <ul>
-     * <li>a POJO contains more than one occurrence of another table's POJO
-     * <li>the table is referenced multiple times in the JOIN statement, creating confusion for the request
-     * </ul>
-     *
-     * @param aliasName The alias that will be set for the table in the request AND used to retrieve the POJO's field to assign the value
-     */
-    public void setAlias(String aliasName) {
-        dataName = aliasName;
-    }
-
     /*
-     * DBDATA HANDLING
+     * ABSTRACT METHODS
      */
 
     /**
@@ -125,7 +117,413 @@ public abstract class DBTable<T> extends DBData<T> {
     public abstract DBTable<T> selectId();
 
     /**
-     * Add the ID to the query. This implementation make sure that the ID can be found anytime during extraction of the datas.
+     * Return the column name for this table id without the table name or its alias
+     *
+     * @return The column name for this table id
+     */
+    protected abstract List<String> getId();
+
+    /*
+     * OVERRIDDEN METHODS
+     */
+
+    @Override
+    protected List<String> buildSelect(String tableName) {
+        List<String> projection = new ArrayList<>();
+        for (DBData<?> fieldToSelect : primitiveQueries) {
+            projection.addAll(fieldToSelect.buildSelect(dataName));
+        }
+        for (DBData<?> fieldToSelect : tableQueries) {
+            projection.addAll(fieldToSelect.buildSelect(dataName));
+        }
+        return projection;
+    }
+
+    @Override
+    protected void extractRowValue(Cursor cursor, int column) {
+        try {
+            if (initRowPosition == -1) {
+                initRowPosition = cursor.getPosition();
+            }
+            isSubTableFinished = false;
+
+            int currentColumn = column;
+
+            if (isANewObject) {
+                for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
+                    primitiveToExtract.extractRowValue(cursor, currentColumn);
+                    try {
+                        Field field = getFieldToSet(primitiveToExtract);
+                        field.set(currentObject, primitiveToExtract.getValue());
+                    } catch (NoSuchFieldException exception) {
+                        Log.e("WHAT", "error extracting a value in table " + dataName, exception);
+                    }
+                    currentColumn++;
+                }
+                isANewObject = false;
+            } else {
+                currentColumn += primitiveQueries.size();
+            }
+
+            for (DBTable<?> tableToExtract : tableQueries) {
+                if (isSubTableFinished && !tableToExtract.willBeRedundant) {
+                    tableToExtract.setComplete();
+                    tableToExtract.setWillBeRedundant(true, cursor.getPosition());
+                    setValues(tableToExtract);
+                    tableToExtract.resetCurrentParsing();
+                    tableToExtract.initId(cursor, currentColumn);
+                    tableToExtract.extractRowValue(cursor, currentColumn);
+                } else if (!tableToExtract.willBeRedundant) {
+                    if (!tableToExtract.compareIDs(cursor, currentColumn)) {
+                        tableToExtract.setComplete();
+                        if (isAList(tableToExtract)) {
+                            tableToExtract.addResultToList();
+                        } else {
+                            Field field = getFieldToSet(tableToExtract);
+                            field.set(currentObject, tableToExtract.getValue());
+                        }
+                        tableToExtract.resetCurrentParsing();
+                        isSubTableFinished = true;
+                    }
+                    tableToExtract.initId(cursor, currentColumn);
+                    tableToExtract.extractRowValue(cursor, currentColumn);
+                    isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
+                }
+                currentColumn += tableToExtract.getNumberOfColumnsQueried();
+            }
+        } catch (Exception ex) {
+            throw new DBArchitectureException(ex);
+        }
+    }
+
+    @Override
+    protected void setComplete() {
+        super.setComplete();
+
+        try {
+            for (DBTable<?> tableToExtract : tableQueries) {
+                tableToExtract.setComplete();
+                if (!tableToExtract.willBeRedundant) {
+                    setValues(tableToExtract);
+                }
+                tableToExtract.setWillBeRedundant(false, 0);
+                tableToExtract.resetCurrentParsing();
+                tableToExtract.resetList();
+            }
+        } catch (Exception ex) {
+            throw new DBArchitectureException("Exception caught during the parsing of table " + tableName + "(alias : " + dataName + ")", ex);
+        }
+    }
+
+    @Override
+    protected void resetCurrentParsing() {
+        super.resetCurrentParsing();
+        try {
+            currentObject = modelObjectClass.newInstance();
+            for (DBData<?> fieldToReset : tableQueries) {
+                fieldToReset.resetCurrentParsing();
+            }
+            ids = new DbId();
+            isANewObject = true;
+            isSubTableFinished = false;
+        } catch (Exception e) {
+            throw new DBArchitectureException(e);
+        }
+    }
+
+    /*
+     * PUBLIC METHODS
+     */
+
+    /**
+     * Add a statement to add to a collection of WhereStatement
+     *
+     * @param statement the where statement
+     * @return this DBTable for chaining commands
+     */
+    @SuppressWarnings("unused")
+    public DBTable<T> addWhere(WhereStatement statement) {
+        wheres.add(statement);
+        return this;
+    }
+
+    /**
+     * Parse and return the complete list of object corresponding to this DBTable in the SQLite database provided in the SQLiteOpenHelper
+     *
+     * @param openHelper The helper providing access to the database to query
+     * @return The list of results
+     */
+    @SuppressWarnings("unused")
+    public List<T> getResult(SQLiteOpenHelper openHelper) {
+        return getResult(openHelper, QUERY_ALL_ITEMS);
+    }
+
+    /**
+     * Parse and return a list of the next nbItem objects corresponding to this DBTable in the SQLite database provided in the SQLiteOpenHelper
+     *
+     * @param openHelper The helper providing access to the database to query
+     * @param nbItem     The number of item to retrieve
+     * @return A list containing the next nbItem objects for this query
+     */
+    @SuppressWarnings("unused")
+    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem) {
+        return getResult(openHelper, nbItem, false);
+    }
+
+    /**
+     * Parse and return a list of all item parsed so far if isReturningAllList is true plus the next nbItem objects corresponding
+     * to this DBTable in the SQLite database provided in the SQLiteOpenHelper
+     *
+     * @param openHelper         The helper providing access to the database to query
+     * @param nbItem             The number of item to retrieve
+     * @param isReturningAllList If true, the list will contain all the items parsed so far
+     * @return a list of object corresponding to the query for this database
+     */
+    @SuppressWarnings("unused")
+    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem, boolean isReturningAllList) {
+        if (openHelper == null) {
+            throw new NullPointerException("Please provide an initialized SQLiteOpenHelper");
+        }
+
+        if (!isReturningAllList) {
+            resetList();//todo completeResult AND lastResult ?
+        }
+
+        if (cursor == null) {
+            SQLiteQueryBuilder query = new SQLiteQueryBuilder();
+            query.setTables(getJoinComplete());
+            cursor = query.query(openHelper.getReadableDatabase(), getSelect(), getWhere(), null, null, null, getOrderBy());
+        }
+
+        return getResult(cursor, nbItem);
+    }
+
+    /**
+     * Calling this method will reset the result parsed so far, and query again from start.
+     */
+    @SuppressWarnings("unused")
+    public void resetQuery() {
+        resetList();
+        cursor = null;
+    }
+
+    /**
+     * Check if this table has more result to parse
+     *
+     * @return true if {@link #getResult(SQLiteOpenHelper, int, boolean)} of {@link #getResult(SQLiteOpenHelper, int)}
+     * has more result to parse and return
+     */
+    @SuppressWarnings("unused")
+    public boolean hasMoreResults() {
+        return cursor != null && !cursor.isAfterLast();
+    }
+
+    /**
+     * Write all the demanded object pass by write methods into the database represented by the SQLiteOpenHelper in parameter.
+     *
+     * @param openHelper the SQLiteOpenHelper for the database to write
+     */
+    @SuppressWarnings("unused")
+    public void writeAll(SQLiteOpenHelper openHelper) {
+        openHelper.getWritableDatabase().beginTransaction();
+        try {
+            List<DBWrite> write = new ArrayList<>();
+            getWrite(write, "");
+            for (DBWrite toWrite : write) {
+                openHelper.getWritableDatabase().insert(toWrite.getTableName(), null, toWrite.getValue());
+            }
+            openHelper.getWritableDatabase().setTransactionSuccessful();
+        } finally {
+            openHelper.getWritableDatabase().endTransaction();
+            openHelper.close();
+        }
+    }
+
+    /**
+     * Write all the demanded object pass by write methods into the database represented by the SQLiteOpenHelper in parameter.
+     *
+     * @param openHelper the SQLiteOpenHelper for the database to write
+     */
+    @SuppressWarnings("unused")
+    public void deleteAll(SQLiteOpenHelper openHelper) {
+        openHelper.getWritableDatabase().beginTransaction();
+        try {
+            List<DBDelete> deletes = getDelete();
+            for (DBDelete delete : deletes) {
+
+                List<String> whereArgs = delete.getWhereArgs();
+                String[] argsArray = new String[whereArgs.size()];
+                int i = 0;
+                for (String integer : whereArgs) {
+                    argsArray[i++] = integer;
+                }
+                openHelper.getWritableDatabase().delete(delete.getTableName(), delete.getWhereClause(), argsArray);
+            }
+            openHelper.getWritableDatabase().setTransactionSuccessful();
+        } finally {
+            openHelper.getWritableDatabase().endTransaction();
+            openHelper.close();
+        }
+    }
+
+    /*
+     * PROTECTED METHODS
+     */
+
+    //QUERY BUILDING
+
+    /**
+     * Construct and return an array of fields' names selected for the query. This method should be used uniquely if this DBTable is not a inner
+     * DBData.
+     *
+     * @return an array of fields'names to be queried
+     */
+    protected String[] getSelect() {
+        List<String> buildSelect = buildSelect("");
+        String[] projection = new String[buildSelect.size()];
+        return buildSelect.toArray(projection);
+    }
+
+    /**
+     * Populate a list of DBWrite with the data asked for writing.
+     *
+     * @param writes    The list of DBWrite to populate.
+     * @param reference If given the name of the id field, will return it's value. // todo I don't remember if this is correct, also, multiple ids.
+     * @return The id if the name is provided, 0 otherwise.
+     */
+    protected int getWrite(List<DBWrite> writes, String reference) {
+        int referenceId = 0;
+        try {
+            ContentValues value = new ContentValues();
+            for (int i = 0; i < tableNameWrites.size(); i++) {
+                value.put(tableNameWrites.get(i), tableWrites.get(i).getWrite(writes, tableValueRefWrites.get(i)));
+            }
+            for (DBPrimitiveField<?> field : primitiveWrites) {
+                if (field instanceof StringField) {
+                    value.put(field.dataName, (String) getFieldToSet(field).get(objectToWrite));
+                } else if (field instanceof DoubleField) {
+                    value.put(field.dataName, (Double) getFieldToSet(field).get(objectToWrite));
+                } else if (field instanceof NullField) {
+                    value.putNull(field.dataName);
+                } else if (field instanceof BooleanField) {
+                    value.put(field.dataName, (Boolean) getFieldToSet(field).get(objectToWrite));
+                } else if (field instanceof IntField) {
+
+                    Integer integer = (Integer) getFieldToSet(field).get(objectToWrite);
+                    if (field.dataName.equals(reference)) {
+                        referenceId = integer;
+                    }
+                    value.put(field.dataName, integer);
+                }
+            }
+            writes.add(new DBWrite(dataName, value));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return referenceId;
+    }
+
+    /**
+     * Create and construct a list of {@link be.florien.joinorm.architecture.DBDelete DBDelete}
+     *
+     * @return A list of DBDelete
+     */
+    protected List<DBDelete> getDelete() {
+        List<DBDelete> deletes = new ArrayList<>();
+        for (DbId id : deleteIds) {
+            List<String> idNames = getCompleteId();
+            deletes.add(new DBDelete(dataName, idNames, id.getIds()));
+        }
+        return deletes;
+    }
+
+    /**
+     * Construct and return the where statement associated
+     *
+     * @return the where statement
+     */
+    protected String getWhere() {
+        String where = "";
+        for (WhereStatement statement : wheres) {
+            if (!TextUtils.isEmpty(where)) {
+                if (statement.isOr()) {
+                    where += " OR ";
+                } else {
+                    where += " AND ";
+                }
+            } else {
+                where += "(";
+            }
+            where += dataName + "." + statement.getStatement();
+        }
+        if (!TextUtils.isEmpty(where)) {
+            where += ")";
+        }
+        for (DBTable<?> field : tableQueries) {
+            String toAdd = field.getWhere();
+            if (!TextUtils.isEmpty(toAdd) && !TextUtils.isEmpty(where)) {
+                where += " AND ";
+            }
+            where += toAdd;
+        }
+        return where;
+    }
+
+    /**
+     * Return a list of fields'names from the database to order the query by.
+     *
+     * @return a list of fields'names
+     */
+    protected String getOrderBy() {
+        String orderBy = getOrderByForThis();
+        for (DBTable<?> fieldToSelect : tableQueries) {
+            orderBy += ", " + fieldToSelect.getOrderBy();
+        }
+        return orderBy;
+    }
+
+    /**
+     * Return a column name in the form "TABLE_ALIAS.COLUMN_NAME". Override this method if you want the sorting to be another column than the ID
+     * (Default). But be careful as the data from a single object must be in consecutive rows in the query result.
+     *
+     * @return A column name in the form "TABLE_ALIAS.COLUMN_NAME"
+     */
+    //todo annotation for overriding ?
+    private String getOrderByForThis() {
+        String orderBy = "";
+        List<String> completeId = getCompleteId();
+        for (String idComplete : completeId) {
+            if (!idComplete.equals(completeId.get(0))) {
+                orderBy = orderBy + ", ";
+            }
+            orderBy = orderBy + idComplete;
+        }
+        return orderBy;
+    }
+
+    /**
+     * Construct and return the JOIN statement for this table and all its inner tables. This method should be used uniquely if this DBTable is not a
+     * inner DBData.
+     *
+     * @return The complete JOIN statement for the query
+     */
+    protected String getJoinComplete() {
+        return tableName + (dataName.equals(tableName) ? "" : " AS " + dataName) + getJoinsToAllTables();
+    }
+
+    private String getJoinsToAllTables() {
+        String tables = "";
+        for (DBTable<?> field : tableQueries) {
+            tables = tables + " " + getJoinToInnerTable(field);
+            tables = tables + " " + field.getJoinsToAllTables();
+        }
+        return tables;
+    }
+
+    // SELECT METHODS
+
+    /**
+     * Add the ID to the query. This implementation make sure that the ID can be found anytime during extraction of the data.
      *
      * @param columnNames The names of the field as in the database's table
      */
@@ -144,6 +542,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void selectString(String columnName) {
         StringField stringField = new StringField(columnName);
         primitiveQueries.remove(stringField);
@@ -156,6 +555,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void selectInt(String columnName) {
         IntField intField = new IntField(columnName);
         primitiveQueries.remove(intField);
@@ -167,6 +567,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void selectBoolean(String columnName) {
         BooleanField booleanField = new BooleanField(columnName);
         primitiveQueries.remove(booleanField);
@@ -178,6 +579,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param columnName the field's name as in the database's table
      */
+    @SuppressWarnings("unused")
     protected void selectDouble(String columnName) {
         DoubleField doubleField = new DoubleField(columnName);
         primitiveQueries.remove(doubleField);
@@ -189,45 +591,29 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param tableField A representation of the table to query.
      */
+    @SuppressWarnings("unused")
     protected void selectTable(DBTable<?> tableField) {
+        selectTable(tableField, null);
+    }
+
+    /**
+     * Add the table represented by tableField to the query, with the alias given in parameter.
+     *
+     * @param tableField A representation of the table to query.
+     * @param alias      The alias that will be set for the table in the request AND used to retrieve the model object's field to assign the value.
+     */
+    @SuppressWarnings("unused")
+    protected void selectTable(DBTable<?> tableField, String alias) {
+        if (alias != null) {
+            tableField.setAlias(alias);
+        }
         tableQueries.remove(tableField);
         selectId();
         tableQueries.add(tableField);
 
     }
 
-    /*
-     * DELETE HANDLING
-     */
-
-    /**
-     * Add an ID (or composite) to the list of IDs to delete from the DataBase
-     *
-     * @param ids The ids of the object to delete
-     */
-    protected void deleteId(int... ids) {
-        DBID dbId = new DBID(ids);
-        deleteIds.remove(dbId);
-        deleteIds.add(dbId);
-    }
-
-    /**
-     * Create and construct a list of {@link be.florien.joinorm.architecture.DBDelete DBDelete}
-     *
-     * @return A list of DBDelete
-     */
-    public List<DBDelete> getDelete() {
-        List<DBDelete> deletes = new ArrayList<>();
-        for (DBID id : deleteIds) {
-            List<String> idNames = getCompleteId();
-            deletes.add(new DBDelete(dataName, idNames, id.getIds()));
-        }
-        return deletes;
-    }
-
-    /*
-     * WRITING HANDLING
-     */
+    // WRITE METHODS
 
     /**
      * Add the value to be written in columnName
@@ -263,6 +649,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * Add a boolean value to be written
      *
      * @param columnName the field's name as in the database's table
+     * @param bool       The value for the object at corresponding columnName
      */
     @SuppressWarnings("unused")
     protected void writeBoolean(String columnName, boolean bool) {
@@ -280,6 +667,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * Add a int value to be written
      *
      * @param columnName the field's name as in the database's table
+     * @param integer    The value for the object at corresponding columnName
      */
     @SuppressWarnings("unused")
     protected void writeInt(String columnName, int integer) {
@@ -296,7 +684,8 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Add a double value to be written
      *
-     * @param columnName the field's name as in the database's table
+     * @param columnName  the field's name as in the database's table
+     * @param doubleValue The value for the object at corresponding columnName
      */
     @SuppressWarnings("unused")
     protected void writeDouble(String columnName, double doubleValue) {
@@ -313,10 +702,13 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Add the table represented by tableField to the query.
      *
-     * @param tableField A representation of the table to query.
+     * @param tableField     A representation of the table to query.
+     * @param tableRef       The name of the field containing the table
+     * @param tableRefValue  I don't remember and I should try to investigate todo
+     * @param objectToAssign The value to write
      */
     @SuppressWarnings("unused")
-    protected void writeTable(DBTable<?> tableField, String tableRef, String tableRefValue, Object pojoToAssign) {
+    protected void writeTable(DBTable<?> tableField, String tableRef, String tableRefValue, Object objectToAssign) {
         tableWrites.remove(tableField);
         tableWrites.add(tableField);
         tableNameWrites.remove(tableRef);
@@ -324,107 +716,33 @@ public abstract class DBTable<T> extends DBData<T> {
         tableValueRefWrites.remove(tableRefValue);
         tableValueRefWrites.add(tableRefValue);
         try {
-            getFieldToSet(tableField).set(objectToWrite, pojoToAssign);
+            getFieldToSet(tableField).set(objectToWrite, objectToAssign);
         } catch (Exception e) {
             e.printStackTrace();
         }
 
     }
 
+    // DELETE METHODS
+
     /**
-     * Populate a list of DBWrite with the data asked for writing.
+     * Add an ID (or composite) to the list of IDs to delete from the DataBase
      *
-     * @param writes    The list of DBWrite to populate.
-     * @param reference If given the name of the id field, will return it's value. // todo I don't remember if this is correct, also, multiple ids.
-     * @return The id if the name is provided, 0 otherwise.
+     * @param ids The ids of the object to delete
      */
-    public int getValuesToWrite(List<DBWrite> writes, String reference) {
-        int referenceId = 0;
-        try {
-            ContentValues value = new ContentValues();
-            for (int i = 0; i < tableNameWrites.size(); i++) {
-                value.put(tableNameWrites.get(i), tableWrites.get(i).getValuesToWrite(writes, tableValueRefWrites.get(i)));
-            }
-            for (DBPrimitiveField<?> field : primitiveWrites) {
-                if (field instanceof StringField) {
-                    value.put(field.dataName, (String) getFieldToSet(field).get(objectToWrite));
-                } else if (field instanceof DoubleField) {
-                    value.put(field.dataName, (Double) getFieldToSet(field).get(objectToWrite));
-                } else if (field instanceof NullField) {
-                    value.putNull(field.dataName);
-                } else if (field instanceof BooleanField) {
-                    value.put(field.dataName, (Boolean) getFieldToSet(field).get(objectToWrite));
-                } else if (field instanceof IntField) {
-
-                    Integer integer = (Integer) getFieldToSet(field).get(objectToWrite);
-                    if (field.dataName.equals(reference)) {
-                        referenceId = integer;
-                    }
-                    value.put(field.dataName, integer);
-                }
-            }
-            writes.add(new DBWrite(dataName, value));
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return referenceId;
+    @SuppressWarnings("unused")
+    protected void deleteId(int... ids) {
+        DbId dbId = new DbId(ids);
+        deleteIds.remove(dbId);
+        deleteIds.add(dbId);
     }
 
-    /*
-     * PROJECTION HANDLING
-     */
+    // DB TABLES AND JOIN HANDLING
 
     /**
-     * Construct and return an array of fields' names selected for the query. This method should be used uniquely if this DBTable is not a inner
-     * DBData.
+     * Return the IDs with the form containing the alias
      *
-     * @return an array of fields'names to be queried
-     */
-    public String[] getProjection() {
-        List<String> buildSelect = buildProjection("");
-        String[] projection = new String[buildSelect.size()];
-        return buildSelect.toArray(projection);
-    }
-
-    @Override
-    protected List<String> buildProjection(String tableName) {
-        List<String> projection = new ArrayList<>();
-        for (DBData<?> fieldToSelect : primitiveQueries) {
-            projection.addAll(fieldToSelect.buildProjection(dataName));
-        }
-        for (DBData<?> fieldToSelect : tableQueries) {
-            projection.addAll(fieldToSelect.buildProjection(dataName));
-        }
-        return projection;
-    }
-
-    /**
-     * Used to know how many columns has been read by this parser
-     */
-    private int getNumberOfColumnsQueried() {
-        if (columnQueriedCount == -1) {
-            columnQueriedCount = primitiveQueries.size();
-            for (DBTable<?> field : tableQueries) {
-                columnQueriedCount += field.getNumberOfColumnsQueried();
-            }
-        }
-        return columnQueriedCount;
-    }
-
-    /*
-     * DB TABLES AND JOIN HANDLING
-     */
-
-    /**
-     * Return the column name for this table id without the table name or its alias
-     *
-     * @return The column name for this table id
-     */
-    protected abstract List<String> getId();
-
-    /**
-     * todo
-     * @return
+     * @return The complete form of the IDs
      */
     protected List<String> getCompleteId() {
         List<String> ids = new ArrayList<>(getId().size());
@@ -442,7 +760,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * join statement manually is also supported, but it should be kept in mind that this table could have been assigned to an alias, and thus
      * {@link be.florien.joinorm.architecture.DBData#getDataName() getDataName} should be used to get the table's name or alias.
      *
-     * @param innerTable The DBTable representing a POJO which is present in this DBTable's POJO. Implementation of this method should test which
+     * @param innerTable The DBTable representing a model object which is present in this DBTable's model object. Implementation of this method should test which
      *                   table it represent and return the according JOIN statement.
      * @return The JOIN statement
      */
@@ -452,8 +770,9 @@ public abstract class DBTable<T> extends DBData<T> {
      * Construct and return a JOIN statement where innerTable contain a reference to this table ID
      *
      * @param innerTable    The table to join to this one
+     * @param isLeftJoin    Whether this table is a left join or not todo explain more what a left join is
      * @param innerTableRef The columnName which refer to this table ID, without the table's name
-     * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.ID = INNER_TABLE[_ALIAS].INNER_TABLE_REF"
+     * @return The JOIN statement in the form "[LEFT ]JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.ID = INNER_TABLE[_ALIAS].INNER_TABLE_REF"
      */
     protected String getJoinOnId(DBTable<?> innerTable, boolean isLeftJoin, String... innerTableRef) {
         return (isLeftJoin ? "LEFT " : "") + "JOIN " + innerTable.tableName + (innerTable.dataName.equals(tableName) ? "" : " AS " + innerTable.dataName)
@@ -464,6 +783,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * Construct and return a JOIN statement where this table contain a reference to innerTable ID
      *
      * @param innerTable   The table to join to this one
+     * @param isLeftJoin   Whether this table is a left join or not todo explain more what a left join is
      * @param thisTableRef The columnName which refer to the innerTable ID, without the table's name
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.THIS_TABLE_REF = INNER_TABLE[_ALIAS].ID"
      */
@@ -472,10 +792,10 @@ public abstract class DBTable<T> extends DBData<T> {
                 + getJoinConditionOnRef(innerTable, thisTableRef);
     }
 
-    private String getJoinConditionOnID(DBTable<?> innerTable, String... innerTableRef) {//todo verify if all is same size
+    private String getJoinConditionOnID(DBTable<?> innerTable, String... innerTableRef) {
         String join = " ON ";
         List<String> ids = getCompleteId();
-        for (int i = 0; i < ids.size(); i++) {
+        for (int i = 0; i < ids.size() && innerTableRef != null && i < innerTableRef.length; i++) {
             if (i > 0) {
                 join = join + " and ";
             }
@@ -486,10 +806,10 @@ public abstract class DBTable<T> extends DBData<T> {
         return join;
     }
 
-    private String getJoinConditionOnRef(DBTable<?> innerTable, String... thisTableRef) {//todo verify if all is same size
+    private String getJoinConditionOnRef(DBTable<?> innerTable, String... thisTableRef) {
         String join = " ON ";
         List<String> ids = getId();
-        for (int i = 0; i < ids.size(); i++) {
+        for (int i = 0; i < ids.size() && thisTableRef != null && i < thisTableRef.length; i++) {
             if (i > 0) {
                 join = join + " and ";
             }
@@ -500,150 +820,44 @@ public abstract class DBTable<T> extends DBData<T> {
         return join;
     }
 
-    /**
-     * Construct and return the JOIN statement for this table and all its inner tables. This method should be used uniquely if this DBTable is not a
-     * inner DBData.
-     *
-     * @return The complete JOIN statement for the query
-     */
-    public String getJoinComplete() {
-        return tableName + (dataName.equals(tableName) ? "" : " AS " + dataName) + getJoinsToAllTables();
-    }
-
-    private String getJoinsToAllTables() {
-        String tables = "";
-        for (DBTable<?> field : tableQueries) {
-            tables = tables + " " + getJoinToInnerTable(field);
-            tables = tables + " " + field.getJoinsToAllTables();
-        }
-        return tables;
-    }
-
     /*
-     * WHERE HANDLING
+     * PRIVATE METHODS
      */
 
     /**
-     * Construct and return the where statement associated
+     * Set an alias for this table. Said alias could be use in case where:
+     * <ul>
+     * <li>a model object contains more than one occurrence of another table's model object
+     * <li>the table is referenced multiple times in the JOIN statement, creating confusion for the request
+     * </ul>
      *
-     * @return the where statement
+     * @param aliasName The alias that will be set for the table in the request AND used to retrieve the model object's field to assign the value
      */
-    public String getWhere() {
-        String where = "";
-        for (WhereStatement statement : wheres) {
-            if (!TextUtils.isEmpty(where)) {
-                if (statement.isOr()) {
-                    where += " OR ";
-                } else {
-                    where += " AND ";
-                }
-            } else {
-                where += "(";
+    private void setAlias(String aliasName) {
+        dataName = aliasName;
+    }
+
+    // DATA EXTRACTION
+
+    /**
+     * Used to know how many columns has been read by this parser
+     */
+    private int getNumberOfColumnsQueried() {
+        if (columnQueriedCount == -1) {
+            columnQueriedCount = primitiveQueries.size();
+            for (DBTable<?> field : tableQueries) {
+                columnQueriedCount += field.getNumberOfColumnsQueried();
             }
-            where += dataName + "." + statement.getStatement();
         }
-        if (!TextUtils.isEmpty(where)) {
-            where += ")";
-        }
-        for (DBTable<?> field : tableQueries) {
-            String toAdd = field.getWhere();
-            if (!TextUtils.isEmpty(toAdd) && !TextUtils.isEmpty(where)) {
-                where += " AND ";
-            }
-            where += toAdd;
-        }
-        return where;
+        return columnQueriedCount;
     }
 
     /**
-     * Add a statement to add to a collection of WhereStatement
+     * Extract the data from the Cursor in parameter and return a List of model object filled with queried fields
      *
-     * @param statement the where statement
-     */
-    public DBTable<T> addWhere(WhereStatement statement) {
-        wheres.add(statement);
-        return this;
-    }
-
-    /*
-     * ORDER BY HANDLING
-     */
-
-    /**
-     * Return a list of fields'names from the database to order the query by.
-     *
-     * @return a list of fields'names
-     */
-    public String getOrderBy() {
-        String orderby = getOrderByForThis();
-        for (DBTable<?> fieldToSelect : tableQueries) {
-            orderby += ", " + fieldToSelect.getOrderBy();
-        }
-        return orderby;
-    }
-
-    /**
-     * Return a column name in the form "TABLE_ALIAS.COLUMN_NAME". Override this method if you want the sorting to be another column than the ID
-     * (Default). But be careful as the datas from a single object must be in consecutive rows in the query result.
-     *
-     * @return A column name in the form "TABLE_ALIAS.COLUMN_NAME"
-     */
-    protected String getOrderByForThis() {
-        String orderBy = "";
-        List<String> completeId = getCompleteId();
-        for (String idComplete : completeId) {
-            if (!idComplete.equals(completeId.get(0))) {
-                orderBy = orderBy + ", ";
-            }
-            orderBy = orderBy + idComplete;
-        }
-        return orderBy;
-    }
-
-    /*
-     * DATA EXTRACTION
-     */
-
-    public void resetTable() { //todo bettername ?
-        resetList();
-        cursor = null;
-    }
-
-    public boolean hasMoreResults() {
-        return cursor != null && !cursor.isAfterLast();
-    }
-
-    public List<T> getResult(SQLiteOpenHelper openHelper) {
-        return getResult(openHelper, ALL_ITEMS);
-    }
-
-    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem) {
-        return getResult(openHelper, nbItem, false);
-    }
-
-    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem, boolean isReturningAllList) {
-        if (openHelper == null) {
-            throw new NullPointerException("Please provide an initialized SQLiteOpenHelper");
-        }
-
-        if (!isReturningAllList) {
-            resetList();
-        }
-
-        if (cursor == null) {
-            SQLiteQueryBuilder query = new SQLiteQueryBuilder();
-            query.setTables(getJoinComplete());
-            cursor = query.query(openHelper.getReadableDatabase(), getProjection(), getWhere(), null, null, null, getOrderBy());
-        }
-
-        return getResult(cursor, nbItem);
-    }
-
-    /**
-     * Extract the datas from the Cursor in parameter and return a List of POJO filled with queried fields
-     *
-     * @param cursor The cursor which has received the datas from the database.
-     * @return a List of POJO
+     * @param cursor The cursor which has received the data from the database.
+     * @param nbItem The number of item to retrieve
+     * @return a List of model object
      */
     private List<T> getResult(Cursor cursor, int nbItem) {
         if (cursor.isBeforeFirst()) {
@@ -655,7 +869,7 @@ public abstract class DBTable<T> extends DBData<T> {
         } else {
             return getResultList();
         }
-        while (!cursor.isAfterLast() && (nbItem == ALL_ITEMS || itemParsed < nbItem)) {
+        while (!cursor.isAfterLast() && (nbItem == QUERY_ALL_ITEMS || itemParsed < nbItem)) {
             if (compareIDs(cursor, 0)) {
                 extractRowValue(cursor, 0);
                 int rowToFinishParsing = getRowToFinishParsing();
@@ -717,11 +931,11 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     /**
-     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the POJO. Retrieve
-     * said field by using the columnName or the alias is one is set. Override this method if you want the POJO's field name and the columnName/alias
+     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the model object. Retrieve
+     * said field by using the columnName or the alias is one is set. Override this method if you want the model object's field name and the columnName/alias
      * to be different.
      *
-     * @param fieldToSet Representation for retrieving the data from the database. Used to get the POJO field name
+     * @param fieldToSet Representation for retrieving the data from the database. Used to get the model object field name
      * @return The Field to be set
      * @throws NoSuchFieldException
      */
@@ -730,15 +944,15 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     /**
-     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the POJO. Retrieve
-     * said field by using the field to set. Override this method if you want the POJO's field name and fieldToSet to be different.
+     * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the model object. Retrieve
+     * said field by using the field to set. Override this method if you want the model object's field name and fieldToSet to be different.
      *
-     * @param fieldToSet The POJO field name
+     * @param fieldToSet The model object field name
      * @return The Field to be set
      * @throws NoSuchFieldException
      */
     private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        return pojoClass.getField(fieldToSet);
+        return modelObjectClass.getField(fieldToSet);
     }
 
     private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
@@ -747,83 +961,7 @@ public abstract class DBTable<T> extends DBData<T> {
         return genericType instanceof ParameterizedType;
     }
 
-    @Override
-    protected void extractRowValue(Cursor cursor, int column) {
-        try {
-            if (initRowPosition == -1) {
-                initRowPosition = cursor.getPosition();
-            }
-            isSubTableFinished = false;
-
-            int currentColumn = column;
-
-            if (isANewObject) {
-                for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
-                    primitiveToExtract.extractRowValue(cursor, currentColumn);
-                    try {
-                        Field field = getFieldToSet(primitiveToExtract);
-                        field.set(currentObject, primitiveToExtract.getValue());
-                    } catch (NoSuchFieldException exception) {
-                        Log.e("WHAT", "error extracting a value in table "+ dataName, exception);
-                    }
-                    currentColumn++;
-                }
-                isANewObject = false;
-            } else {
-                currentColumn += primitiveQueries.size();
-            }
-
-            for (DBTable<?> tableToExtract : tableQueries) {
-                if (isSubTableFinished && !tableToExtract.willBeRedundant) {
-                    tableToExtract.setComplete();
-                    tableToExtract.setIsGonnaBeRedundant(true, cursor.getPosition());
-                    setValues(tableToExtract);
-                    tableToExtract.resetCurrentParsing();
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                } else if (!tableToExtract.willBeRedundant) {
-                    if (!tableToExtract.compareIDs(cursor, currentColumn)) {
-                        tableToExtract.setComplete();
-                        if (isAList(tableToExtract)) {
-                            tableToExtract.addResultToList();
-                        } else {
-                            Field field = getFieldToSet(tableToExtract);
-                            field.set(currentObject, tableToExtract.getValue());
-                        }
-                        tableToExtract.resetCurrentParsing();
-                        isSubTableFinished = true;
-                    }
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                    isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
-                }
-                currentColumn += tableToExtract.getNumberOfColumnsQueried();
-            }
-        } catch (Exception ex) {
-            throw new DBArchitectureException(ex);
-        }
-    }
-
-    @Override
-    protected void setComplete() {
-        super.setComplete();
-
-        try {
-            for (DBTable<?> tableToExtract : tableQueries) {
-                tableToExtract.setComplete();
-                if (!tableToExtract.willBeRedundant) {
-                    setValues(tableToExtract);
-                }
-                tableToExtract.setIsGonnaBeRedundant(false, 0);
-                tableToExtract.resetCurrentParsing();
-                tableToExtract.resetList();
-            }
-        } catch (Exception ex) {
-            throw new DBArchitectureException("Exception caught during the parsing of table " + tableName + "(alias : " + dataName + ")", ex);
-        }
-    }
-
-    private void setIsGonnaBeRedundant(boolean isRedundant, int cursorPosition) {
+    private void setWillBeRedundant(boolean isRedundant, int cursorPosition) {
         if (willBeRedundant == isRedundant) {
             return;
         }
@@ -833,25 +971,8 @@ public abstract class DBTable<T> extends DBData<T> {
         } else {
             redundantRows = 0;
             for (DBTable<?> table : tableQueries) {
-                table.setIsGonnaBeRedundant(false, cursorPosition);
+                table.setWillBeRedundant(false, cursorPosition);
             }
-        }
-    }
-
-    @Override
-    protected void resetCurrentParsing() {
-        super.resetCurrentParsing();
-        try {
-            // Log.d("POKEMON", "currentObject resetted: " + tableName);
-            currentObject = pojoClass.newInstance();
-            for (DBData<?> fieldToReset : tableQueries) {
-                fieldToReset.resetCurrentParsing();
-            }
-            ids = new DBID();
-            isANewObject = true;
-            isSubTableFinished = false;
-        } catch (Exception e) {
-            throw new DBArchitectureException(e);
         }
     }
 

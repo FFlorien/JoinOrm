@@ -7,14 +7,14 @@ import java.util.List;
  * Created by FlamentF on 29-09-16.
  */
 
-class DBID {
+class DbId {
     private List<String> ids;
 
-    DBID() {
+    DbId() {
         ids = new ArrayList<>(0);
     }
 
-    DBID(int... intIds) {
+    DbId(int... intIds) {
         ids = new ArrayList<>(intIds.length);
         for (int id : intIds) {
             this.ids.add(String.valueOf(id));
@@ -23,8 +23,8 @@ class DBID {
 
     @Override
     public boolean equals(Object o) {
-        if (o instanceof DBID) {
-            DBID otherDbId = (DBID) o;
+        if (o instanceof DbId) {
+            DbId otherDbId = (DbId) o;
             if (otherDbId.ids == null && ids == null) {
                 return true;
             } else if (otherDbId.ids == null || ids == null) {
