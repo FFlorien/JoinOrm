@@ -47,7 +47,10 @@ import be.florien.joinorm.primitivefield.StringField;
  * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
+    //todo simplify repeatable and incorporate it into methods
+    //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     //todo when repeatable, dont query repeatable.id but the foreign key, and don't join the table
+    //todo exception handling
     /*
      * CONSTANTS
      */
@@ -72,7 +75,6 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private final String tableName;
     protected final Class<T> modelObjectClass;
-    //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private int initRowPosition;
     private int redundantRows;
     private int columnQueriedCount = -1;
@@ -181,14 +183,22 @@ public abstract class DBTable<T> extends DBData<T> {
 
             for (DBTable<?> tableToExtract : tableQueries) {
                 if (tableToExtract.isRepeatable) {
-                    setValues(tableToExtract);//todo assign the correct object
-                    initValuesFromRepeatable(cursor, tableToExtract, currentColumn);
+                    if (isSubTableFinished) {
+                        tableToExtract.setComplete();
+                        tableToExtract.resetCurrentParsing();
+                    } else {
+                        initValuesFromRepeatable(cursor, tableToExtract, currentColumn);
+                    }
                     currentColumn += tableToExtract.idColumnCount;
                 } else {
                     if (isSubTableFinished && !tableToExtract.willBeRedundant) {
                         tableToExtract.setComplete();
                         tableToExtract.setWillBeRedundant(true, cursor.getPosition());
-                        setValues(tableToExtract);
+                        if (tableToExtract.isRepeatable) {
+                            initValuesFromRepeatable(cursor, tableToExtract, currentColumn);
+                        } else {
+                            setValues(tableToExtract);
+                        }
                         tableToExtract.resetCurrentParsing();
                         tableToExtract.initId(cursor, currentColumn);
                         tableToExtract.extractRowValue(cursor, currentColumn);
@@ -216,20 +226,6 @@ public abstract class DBTable<T> extends DBData<T> {
         }
     }
 
-    private void initValuesFromRepeatable(Cursor cursor, DBTable<?> tableToExtract, int column) {
-        DbId id = new DbId();
-        for (int offset = 0; offset < tableToExtract.idColumnCount; offset++) {
-            id.getIds().add(String.valueOf(cursor.getInt(column + offset)));
-        }
-        tableToExtract.initRepeatableResult(id);
-    }
-
-    private void initRepeatableResult(DbId id) {
-        int position = repeatableIds.indexOf(id);
-        repeatableResult = results.get(position);
-        repeatableResults.add(results.get(position));
-    }
-
     @Override
     protected void setComplete() {
         super.setComplete();
@@ -251,27 +247,6 @@ public abstract class DBTable<T> extends DBData<T> {
             }
         } catch (Exception ex) {
             throw new DBArchitectureException("Exception caught during the parsing of table " + tableName + "(alias : " + dataName + ")", ex);
-        }
-    }
-
-    private void resetRepeatable() {
-        repeatableResult = null;
-        repeatableResults = new ArrayList<>();
-    }
-
-    private void setRepeatableValues(DBTable<?> tableToExtract) {
-
-        try {
-            Field field = getFieldToSet(tableToExtract);
-            if (isAList(tableToExtract)) {
-                field.set(currentObject, tableToExtract.repeatableResults);
-            } else {
-                field.set(currentObject, tableToExtract.repeatableResult);
-            }
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
         }
     }
 
@@ -562,12 +537,10 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     /**
-     * Return a column name in the form "TABLE_ALIAS.COLUMN_NAME". Override this method if you want the sorting to be another column than the ID
-     * (Default). But be careful as the data from a single object must be in consecutive rows in the query result.
+     * Return a column name in the form "TABLE_ALIAS.COLUMN_NAME".
      *
      * @return A column name in the form "TABLE_ALIAS.COLUMN_NAME"
      */
-    //todo annotation for overriding ?
     private String getOrderByForThis() {
         String orderBy = "";
         List<String> completeId = getCompleteId();
@@ -1013,6 +986,39 @@ public abstract class DBTable<T> extends DBData<T> {
         return rows;
     }
 
+    private void initValuesFromRepeatable(Cursor cursor, DBTable<?> tableToExtract, int column) {
+        DbId id = new DbId();
+        for (int offset = 0; offset < tableToExtract.idColumnCount; offset++) {
+            id.getIds().add(String.valueOf(cursor.getInt(column + offset)));
+        }
+        tableToExtract.initRepeatableResult(id);
+    }
+
+    private void initRepeatableResult(DbId id) {
+        int position = repeatableIds.indexOf(id);
+        repeatableResult = results.get(position);
+        repeatableResults.add(results.get(position));
+    }
+
+    private void resetRepeatable() {
+        repeatableResult = null;
+        repeatableResults = new ArrayList<>();
+    }
+
+    private void setRepeatableValues(DBTable<?> tableToExtract) {
+
+        try {
+            Field field = getFieldToSet(tableToExtract);
+            if (isAList(tableToExtract)) {
+                field.set(currentObject, tableToExtract.repeatableResults);
+            } else {
+                field.set(currentObject, tableToExtract.repeatableResult);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     /**
      * Return the {@link java.lang.reflect.Field Field} which will be used by the parser to set the value to the correct filed in the model object. Retrieve
      * said field by using the columnName or the alias is one is set. Override this method if you want the model object's field name and the columnName/alias
@@ -1053,7 +1059,7 @@ public abstract class DBTable<T> extends DBData<T> {
             redundantRows = cursorPosition - initRowPosition;
         } else {
             redundantRows = 0;
-            for (DBTable<?> table : tableQueries) { //todo what about repeatable ?
+            for (DBTable<?> table : tableQueries) {
                 table.setWillBeRedundant(false, cursorPosition);
             }
         }
