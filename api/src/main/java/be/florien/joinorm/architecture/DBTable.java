@@ -47,6 +47,8 @@ import be.florien.joinorm.primitivefield.StringField;
  * @author Florien Flament
  */
 public abstract class DBTable<T> extends DBData<T> {
+    //todo migrate methods "tableToExtract" into tableToExtract
+    //todo only get the type of field one time
     //todo simplify repeatable and incorporate it into methods
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     //todo when repeatable, dont query repeatable.id but the foreign key, and don't join the table
@@ -205,7 +207,7 @@ public abstract class DBTable<T> extends DBData<T> {
                     } else if (!tableToExtract.willBeRedundant) {
                         if (!tableToExtract.compareIDs(cursor, currentColumn)) {
                             tableToExtract.setComplete();
-                            if (isAList(tableToExtract)) {
+                            if (getFieldType(tableToExtract) == FieldTypeEnum.LIST) {
                                 tableToExtract.addResultToList();
                             } else {
                                 Field field = getFieldToSet(tableToExtract);
@@ -1009,7 +1011,7 @@ public abstract class DBTable<T> extends DBData<T> {
 
         try {
             Field field = getFieldToSet(tableToExtract);
-            if (isAList(tableToExtract)) {
+            if (getFieldType(tableToExtract) == FieldTypeEnum.LIST) {
                 field.set(currentObject, tableToExtract.repeatableResults);
             } else {
                 field.set(currentObject, tableToExtract.repeatableResult);
@@ -1044,12 +1046,6 @@ public abstract class DBTable<T> extends DBData<T> {
         return modelObjectClass.getField(fieldToSet);
     }
 
-    private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
-        Field field = getFieldToSet(dbFieldToExtract);
-        Type genericType = field.getGenericType();
-        return genericType instanceof ParameterizedType;
-    }
-
     private void setWillBeRedundant(boolean isRedundant, int cursorPosition) {
         if (willBeRedundant == isRedundant) {
             return;
@@ -1072,12 +1068,25 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private void setValues(DBTable<?> tableToExtract) throws NoSuchFieldException, IllegalAccessException {
         Field field = getFieldToSet(tableToExtract);
-        if (isAList(tableToExtract)) {
+        if (getFieldType(tableToExtract) == FieldTypeEnum.LIST) {
             tableToExtract.addResultToList();
             field.set(currentObject, tableToExtract.getResultList());
         } else {
             field.set(currentObject, tableToExtract.getValue());
         }
+    }
+
+    private FieldTypeEnum getFieldType(DBData<?> dbFieldToExtract) {
+        if (dbFieldToExtract.getFieldTypeEnum() == null) {
+            try {
+                Field field = getFieldToSet(dbFieldToExtract);
+                Type genericType = field.getGenericType();
+                dbFieldToExtract.fieldTypeEnum = genericType instanceof ParameterizedType ? FieldTypeEnum.LIST : FieldTypeEnum.PRIMITIVE;
+            } catch (NoSuchFieldException e) {
+                e.printStackTrace();
+            }
+        }
+        return dbFieldToExtract.fieldTypeEnum;
     }
 
     private void addResultToList() {
@@ -1124,5 +1133,4 @@ public abstract class DBTable<T> extends DBData<T> {
             return false;
         return true;
     }
-
 }

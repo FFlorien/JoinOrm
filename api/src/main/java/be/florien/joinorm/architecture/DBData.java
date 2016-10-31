@@ -20,6 +20,7 @@ public abstract class DBData<T> {
     protected String dataName;
     protected T currentObject;
     boolean isComplete;
+    protected FieldTypeEnum fieldTypeEnum = null;
 
     /**
      * Return the name of this field or table. In case of a DBTable, the dataName could be an alias.
@@ -70,6 +71,10 @@ public abstract class DBData<T> {
     protected void resetCurrentParsing() {
         currentObject = null;
         isComplete = false;
+    }
+
+    public FieldTypeEnum getFieldTypeEnum() {
+        return fieldTypeEnum;
     }
 
     @Override
