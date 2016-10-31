@@ -12,6 +12,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 import be.florien.joinorm.primitivefield.BooleanField;
@@ -66,16 +67,17 @@ public abstract class DBTable<T> extends DBData<T> {
     private final List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
     private final List<DbId> deleteIds = new ArrayList<>();
     private final List<WhereStatement> wheres = new ArrayList<>();
+    private final HashMap<String, Field> fields = new HashMap<>();
 
     private final String tableName;
     protected final Class<T> modelObjectClass;
     //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
-    private int initRowPosition;
+    private int initialRowPosition;
     private int redundantRows;
     private int columnQueriedCount = -1;
     private int idColumnCount;
-    private boolean willBeRedundant = false;
-    private boolean isANewObject = true;
+    private boolean isRedundant = false;
+    private boolean arePrimitiveParsed = false;
 
     private boolean isSubTableFinished;
     private T objectToWrite;
@@ -140,57 +142,22 @@ public abstract class DBTable<T> extends DBData<T> {
     }
 
     @Override
-    protected void extractRowValue(Cursor cursor, int column) {
+    protected void parseRowValue(Cursor cursor, int column) {
         try {
-            if (initRowPosition == -1) {
-                initRowPosition = cursor.getPosition();
+            if (initialRowPosition == -1) {
+                initialRowPosition = cursor.getPosition();
             }
-            isSubTableFinished = false;
 
+            isSubTableFinished = false;
             int currentColumn = column;
 
-            if (isANewObject) {
-                for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
-                    primitiveToExtract.extractRowValue(cursor, currentColumn);
-                    try {
-                        Field field = getFieldToSet(primitiveToExtract);
-                        field.set(currentObject, primitiveToExtract.getValue());
-                    } catch (NoSuchFieldException exception) {
-                        Log.e("WHAT", "error extracting a value in table " + dataName, exception);
-                    }
-                    currentColumn++;
-                }
-                isANewObject = false;
-            } else {
+            if (arePrimitiveParsed) {
                 currentColumn += primitiveQueries.size();
+            } else {
+                currentColumn = parsePrimitives(cursor, currentColumn);
             }
 
-            for (DBTable<?> tableToExtract : tableQueries) {
-                if (isSubTableFinished && !tableToExtract.willBeRedundant) {
-                    tableToExtract.setComplete();
-                    tableToExtract.setWillBeRedundant(true, cursor.getPosition());
-                    setValues(tableToExtract);
-                    tableToExtract.resetCurrentParsing();
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                } else if (!tableToExtract.willBeRedundant) {
-                    if (!tableToExtract.compareIDs(cursor, currentColumn)) {
-                        tableToExtract.setComplete();
-                        if (isAList(tableToExtract)) {
-                            tableToExtract.addResultToList();
-                        } else {
-                            Field field = getFieldToSet(tableToExtract);
-                            field.set(currentObject, tableToExtract.getValue());
-                        }
-                        tableToExtract.resetCurrentParsing();
-                        isSubTableFinished = true;
-                    }
-                    tableToExtract.initId(cursor, currentColumn);
-                    tableToExtract.extractRowValue(cursor, currentColumn);
-                    isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
-                }
-                currentColumn += tableToExtract.getNumberOfColumnsQueried();
-            }
+            parseTables(cursor, currentColumn);
         } catch (Exception ex) {
             throw new DBArchitectureException(ex);
         }
@@ -203,7 +170,7 @@ public abstract class DBTable<T> extends DBData<T> {
         try {
             for (DBTable<?> tableToExtract : tableQueries) {
                 tableToExtract.setComplete();
-                if (!tableToExtract.willBeRedundant) {
+                if (!tableToExtract.isRedundant) {
                     setValues(tableToExtract);
                 }
                 tableToExtract.setWillBeRedundant(false, 0);
@@ -224,7 +191,7 @@ public abstract class DBTable<T> extends DBData<T> {
                 fieldToReset.resetCurrentParsing();
             }
             ids = new DbId();
-            isANewObject = true;
+            arePrimitiveParsed = false;
             isSubTableFinished = false;
         } catch (Exception e) {
             throw new DBArchitectureException(e);
@@ -280,7 +247,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @return a list of object corresponding to the query for this database
      */
     @SuppressWarnings("unused")
-    public List<T> getResult(SQLiteOpenHelper openHelper, int nbItem, boolean isReturningAllList) {
+    private List<T> getResult(SQLiteOpenHelper openHelper, int nbItem, boolean isReturningAllList) {
         if (openHelper == null) {
             throw new NullPointerException("Please provide an initialized SQLiteOpenHelper");
         }
@@ -378,7 +345,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @return an array of fields'names to be queried
      */
-    protected String[] getSelect() {
+    private String[] getSelect() {
         List<String> buildSelect = buildSelect("");
         String[] projection = new String[buildSelect.size()];
         return buildSelect.toArray(projection);
@@ -391,7 +358,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * @param reference If given the name of the id field, will return it's value. // todo I don't remember if this is correct, also, multiple ids.
      * @return The id if the name is provided, 0 otherwise.
      */
-    protected int getWrite(List<DBWrite> writes, String reference) {
+    private int getWrite(List<DBWrite> writes, String reference) {
         int referenceId = 0;
         try {
             ContentValues value = new ContentValues();
@@ -428,7 +395,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @return A list of DBDelete
      */
-    protected List<DBDelete> getDelete() {
+    private List<DBDelete> getDelete() {
         List<DBDelete> deletes = new ArrayList<>();
         for (DbId id : deleteIds) {
             List<String> idNames = getCompleteId();
@@ -507,7 +474,7 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @return The complete JOIN statement for the query
      */
-    protected String getJoinComplete() {
+    private String getJoinComplete() {
         return tableName + (dataName.equals(tableName) ? "" : " AS " + dataName) + getJoinsToAllTables();
     }
 
@@ -534,6 +501,7 @@ public abstract class DBTable<T> extends DBData<T> {
             IntField intField = new IntField(columnName);
             primitiveQueries.remove(intField);
             primitiveQueries.add(position, intField);
+            setListForField(intField);
         }
     }
 
@@ -547,6 +515,7 @@ public abstract class DBTable<T> extends DBData<T> {
         StringField stringField = new StringField(columnName);
         primitiveQueries.remove(stringField);
         primitiveQueries.add(stringField);
+        setListForField(stringField);
 
     }
 
@@ -560,6 +529,7 @@ public abstract class DBTable<T> extends DBData<T> {
         IntField intField = new IntField(columnName);
         primitiveQueries.remove(intField);
         primitiveQueries.add(intField);
+        setListForField(intField);
     }
 
     /**
@@ -572,6 +542,7 @@ public abstract class DBTable<T> extends DBData<T> {
         BooleanField booleanField = new BooleanField(columnName);
         primitiveQueries.remove(booleanField);
         primitiveQueries.add(booleanField);
+        setListForField(booleanField);
     }
 
     /**
@@ -584,6 +555,7 @@ public abstract class DBTable<T> extends DBData<T> {
         DoubleField doubleField = new DoubleField(columnName);
         primitiveQueries.remove(doubleField);
         primitiveQueries.add(doubleField);
+        setListForField(doubleField);
     }
 
     /**
@@ -610,7 +582,18 @@ public abstract class DBTable<T> extends DBData<T> {
         tableQueries.remove(tableField);
         selectId();
         tableQueries.add(tableField);
+        setListForField(tableField);
 
+    }
+
+    private void setListForField(DBData<?> dataField) {
+        try {
+            Field field = getFieldToSet(dataField);
+            Type genericType = field.getGenericType();
+            dataField.setIsList(genericType instanceof ParameterizedType);
+        } catch (NoSuchFieldException e) {
+            e.printStackTrace();//todo as always
+        }
     }
 
     // WRITE METHODS
@@ -871,9 +854,8 @@ public abstract class DBTable<T> extends DBData<T> {
         }
         while (!cursor.isAfterLast() && (nbItem == QUERY_ALL_ITEMS || itemParsed < nbItem)) {
             if (compareIDs(cursor, 0)) {
-                extractRowValue(cursor, 0);
+                parseRowValue(cursor, 0);
                 int rowToFinishParsing = getRowToFinishParsing();
-                // Log.d("POKEMON", "Row to pass == " + rowToFinishParsing + " | number of parsed :" + results.size());
                 for (int rowToPass = rowToFinishParsing; rowToPass > 0 && !cursor.isAfterLast(); rowToPass--) {
                     cursor.moveToNext();
                 }
@@ -911,6 +893,71 @@ public abstract class DBTable<T> extends DBData<T> {
         return true;
     }
 
+    private int parsePrimitives(Cursor cursor, int currentColumn) throws IllegalAccessException {
+        for (DBPrimitiveField<?> primitiveToExtract : primitiveQueries) {
+            primitiveToExtract.parseRowValue(cursor, currentColumn);
+            try {
+                Field field = getFieldToSet(primitiveToExtract);
+                field.set(currentObject, primitiveToExtract.getValue());
+            } catch (NoSuchFieldException exception) {
+                Log.e("WHAT", "error extracting a value in table " + dataName, exception);
+            }
+            currentColumn++;
+        }
+        arePrimitiveParsed = true;
+        return currentColumn;
+    }
+
+    private void parseTables(Cursor cursor, int currentColumn) throws NoSuchFieldException, IllegalAccessException {
+        for (DBTable<?> tableToExtract : tableQueries) {
+            Field field = getFieldToSet(tableToExtract);
+            if (isSubTableFinished && !tableToExtract.isRedundant) {
+                if (tableToExtract.isList()) {
+                    tableToExtract.addResultToList();
+                    field.set(currentObject, tableToExtract.getResultListAndParseNext(cursor, currentColumn));
+                } else {
+                    field.set(currentObject, tableToExtract.getResultAndParseNext(cursor, currentColumn));
+                }
+            } else if (!tableToExtract.isRedundant) {
+                if (!tableToExtract.compareIDs(cursor, currentColumn)) {
+                    tableToExtract.setComplete();
+                    if (tableToExtract.isList()) {
+                        tableToExtract.addResultToList();
+                    } else {
+                        field.set(currentObject, tableToExtract.getValue());
+                    }
+                    tableToExtract.resetCurrentParsing();
+                    isSubTableFinished = true;
+                }
+                tableToExtract.initId(cursor, currentColumn);
+                tableToExtract.parseRowValue(cursor, currentColumn);
+                isSubTableFinished = isSubTableFinished || tableToExtract.isSubTableFinished;
+            }
+            currentColumn += tableToExtract.getNumberOfColumnsQueried();
+        }
+    }
+
+    private List<T> getResultListAndParseNext(Cursor cursor, int currentColumn) {
+        results.add(currentObject);
+        ArrayList<T> list = new ArrayList<>(getResultList());
+        parseNext(cursor, currentColumn);
+        return list;
+    }
+
+    private T getResultAndParseNext(Cursor cursor, int currentColumn) {
+        T object = currentObject;
+        parseNext(cursor, currentColumn);
+        return object;
+    }
+
+    private void parseNext(Cursor cursor, int currentColumn) {
+        setComplete();
+        setWillBeRedundant(true, cursor.getPosition());
+        resetCurrentParsing();
+        initId(cursor, currentColumn);
+        parseRowValue(cursor, currentColumn);
+    }
+
     /**
      * Return the number of rows used for the making of this representation
      *
@@ -918,7 +965,7 @@ public abstract class DBTable<T> extends DBData<T> {
      */
     private int getRowToFinishParsing() {
         int rows;
-        if (!willBeRedundant) {
+        if (!isRedundant) {
             rows = 1;
             for (DBTable<?> table : tableQueries) {
                 int rowToFinishParsing = table.getRowToFinishParsing();
@@ -952,22 +999,19 @@ public abstract class DBTable<T> extends DBData<T> {
      * @throws NoSuchFieldException
      */
     private Field getFieldToSet(String fieldToSet) throws NoSuchFieldException {
-        return modelObjectClass.getField(fieldToSet);
-    }
-
-    private boolean isAList(DBData<?> dbFieldToExtract) throws NoSuchFieldException, IllegalAccessException {
-        Field field = getFieldToSet(dbFieldToExtract);
-        Type genericType = field.getGenericType();
-        return genericType instanceof ParameterizedType;
+        if (!fields.containsKey(fieldToSet)) {
+            fields.put(fieldToSet, modelObjectClass.getField(fieldToSet));
+        }
+        return fields.get(fieldToSet);
     }
 
     private void setWillBeRedundant(boolean isRedundant, int cursorPosition) {
-        if (willBeRedundant == isRedundant) {
+        if (this.isRedundant == isRedundant) {
             return;
         }
-        willBeRedundant = isRedundant;
+        this.isRedundant = isRedundant;
         if (isRedundant) {
-            redundantRows = cursorPosition - initRowPosition;
+            redundantRows = cursorPosition - initialRowPosition;
         } else {
             redundantRows = 0;
             for (DBTable<?> table : tableQueries) {
@@ -978,12 +1022,12 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private void resetList() {
         results = new ArrayList<>();
-        initRowPosition = -1;
+        initialRowPosition = -1;
     }
 
     private void setValues(DBTable<?> tableToExtract) throws NoSuchFieldException, IllegalAccessException {
         Field field = getFieldToSet(tableToExtract);
-        if (isAList(tableToExtract)) {
+        if (tableToExtract.isList()) {
             tableToExtract.addResultToList();
             field.set(currentObject, tableToExtract.getResultList());
         } else {

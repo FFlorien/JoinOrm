@@ -20,6 +20,7 @@ public abstract class DBData<T> {
     protected String dataName;
     protected T currentObject;
     boolean isComplete;
+    protected boolean isList;
 
     /**
      * Return the name of this field or table. In case of a DBTable, the dataName could be an alias.
@@ -35,7 +36,7 @@ public abstract class DBData<T> {
      * @param cursor The Cursor from which the selected field/table will be converted
      * @param column Represent the column number where the selected field/table is stored in the Cursor
      */
-    protected abstract void extractRowValue(Cursor cursor, int column);
+    protected abstract void parseRowValue(Cursor cursor, int column);
 
     /**
      * Construct and return the list of fields to be retrieved in order to make the object representation
@@ -72,6 +73,10 @@ public abstract class DBData<T> {
         isComplete = false;
     }
 
+    protected void setIsList(boolean list) {
+        isList = list;
+    }
+
     @Override
     public int hashCode() {
         final int prime = 31;
@@ -97,4 +102,7 @@ public abstract class DBData<T> {
         return true;
     }
 
+    public boolean isList() {
+        return isList;
+    }
 }

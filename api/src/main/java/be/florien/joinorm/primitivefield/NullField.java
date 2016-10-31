@@ -11,7 +11,7 @@ public class NullField extends DBPrimitiveField<Void> {
     }
 
     @Override
-    protected void extractRowValue(Cursor cursor, int column) {
+    protected void parseRowValue(Cursor cursor, int column) {
         currentObject = null;
         setComplete();
     }

@@ -11,7 +11,7 @@ public class BooleanField extends DBPrimitiveField<Boolean> {
     }
 
     @Override
-    protected void extractRowValue(Cursor cursor, int column) {
+    protected void parseRowValue(Cursor cursor, int column) {
         int value = cursor.getInt(column);
         currentObject = (value == 1);
     }
