@@ -49,6 +49,10 @@ import be.florien.joinorm.primitivefield.StringField;
  */
 public abstract class DBTable<T> extends DBData<T> {
     //todo reorganize methods by accessibility / overriding role
+    //todo as always, exception handling
+    //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
+    // todo multiple ids on write : verify that it works.
+    //todo annotation for overriding orderby ?
     /*
      * CONSTANTS
      */
@@ -62,7 +66,7 @@ public abstract class DBTable<T> extends DBData<T> {
     private final List<DBTable<?>> tableWrites = new ArrayList<>();
     private final List<DBPrimitiveField<?>> primitiveWrites = new ArrayList<>();
     private final List<String> tableNameWrites = new ArrayList<>();
-    private final List<String> tableValueRefWrites = new ArrayList<>();
+    private final List<List<String>> tableValueRefWrites = new ArrayList<>();
     private final List<DBTable<?>> tableQueries = new ArrayList<>();
     private final List<DBPrimitiveField<?>> primitiveQueries = new ArrayList<>();
     private final List<DbId> deleteIds = new ArrayList<>();
@@ -71,7 +75,6 @@ public abstract class DBTable<T> extends DBData<T> {
 
     private final String tableName;
     protected final Class<T> modelObjectClass;
-    //TODO Precision and handling of joinTable ? (table_B that consist of table_A_id and table_C_id)
     private int initialRowPosition;
     private int redundantRows;
     private int columnQueriedCount = -1;
@@ -253,7 +256,7 @@ public abstract class DBTable<T> extends DBData<T> {
         }
 
         if (!isReturningAllList) {
-            resetList();//todo completeResult AND lastResult ?
+            resetList();
         }
 
         if (cursor == null) {
@@ -295,7 +298,7 @@ public abstract class DBTable<T> extends DBData<T> {
         openHelper.getWritableDatabase().beginTransaction();
         try {
             List<DBWrite> write = new ArrayList<>();
-            getWrite(write, "");
+            getWrite(write, new ArrayList<String>());
             for (DBWrite toWrite : write) {
                 openHelper.getWritableDatabase().insert(toWrite.getTableName(), null, toWrite.getValue());
             }
@@ -354,16 +357,19 @@ public abstract class DBTable<T> extends DBData<T> {
     /**
      * Populate a list of DBWrite with the data asked for writing.
      *
-     * @param writes    The list of DBWrite to populate.
-     * @param reference If given the name of the id field, will return it's value. // todo I don't remember if this is correct, also, multiple ids.
-     * @return The id if the name is provided, 0 otherwise.
+     * @param writes  The list of DBWrite to populate.
+     * @param idNames If given the names of the id fields, will return their value.
+     * @return The id values if the names are provided, empty {@link DbId} otherwise.
      */
-    private int getWrite(List<DBWrite> writes, String reference) {
-        int referenceId = 0;
+    private DbId getWrite(List<DBWrite> writes, List<String> idNames) {
+        DbId idValue = new DbId();
         try {
             ContentValues value = new ContentValues();
             for (int i = 0; i < tableNameWrites.size(); i++) {
-                value.put(tableNameWrites.get(i), tableWrites.get(i).getWrite(writes, tableValueRefWrites.get(i)));
+                DbId dbId = tableWrites.get(i).getWrite(writes, tableValueRefWrites.get(i));
+                for (String singleId : dbId.getIds()) {
+                    value.put(tableNameWrites.get(i), singleId);
+                }
             }
             for (DBPrimitiveField<?> field : primitiveWrites) {
                 if (field instanceof StringField) {
@@ -377,8 +383,8 @@ public abstract class DBTable<T> extends DBData<T> {
                 } else if (field instanceof IntField) {
 
                     Integer integer = (Integer) getFieldToSet(field).get(objectToWrite);
-                    if (field.dataName.equals(reference)) {
-                        referenceId = integer;
+                    if (idNames.contains(field.dataName)) {
+                        idValue.getIds().add(String.valueOf(integer));
                     }
                     value.put(field.dataName, integer);
                 }
@@ -387,7 +393,7 @@ public abstract class DBTable<T> extends DBData<T> {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return referenceId;
+        return idValue;
     }
 
     /**
@@ -455,7 +461,6 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @return A column name in the form "TABLE_ALIAS.COLUMN_NAME"
      */
-    //todo annotation for overriding ?
     private String getOrderByForThis() {
         String orderBy = "";
         List<String> completeId = getCompleteId();
@@ -592,7 +597,7 @@ public abstract class DBTable<T> extends DBData<T> {
             Type genericType = field.getGenericType();
             dataField.setIsList(genericType instanceof ParameterizedType);
         } catch (NoSuchFieldException e) {
-            e.printStackTrace();//todo as always
+            e.printStackTrace();
         }
     }
 
@@ -687,17 +692,17 @@ public abstract class DBTable<T> extends DBData<T> {
      *
      * @param tableField     A representation of the table to query.
      * @param tableRef       The name of the field containing the table
-     * @param tableRefValue  I don't remember and I should try to investigate todo
+     * @param tableIdName    The name of the id field in order to retrieve its value later
      * @param objectToAssign The value to write
      */
     @SuppressWarnings("unused")
-    protected void writeTable(DBTable<?> tableField, String tableRef, String tableRefValue, Object objectToAssign) {
+    protected void writeTable(DBTable<?> tableField, String tableRef, List<String> tableIdName, Object objectToAssign) {
         tableWrites.remove(tableField);
         tableWrites.add(tableField);
         tableNameWrites.remove(tableRef);
         tableNameWrites.add(tableRef);
-        tableValueRefWrites.remove(tableRefValue);
-        tableValueRefWrites.add(tableRefValue);
+        tableValueRefWrites.remove(tableIdName);
+        tableValueRefWrites.add(tableIdName);
         try {
             getFieldToSet(tableField).set(objectToWrite, objectToAssign);
         } catch (Exception e) {
@@ -753,7 +758,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * Construct and return a JOIN statement where innerTable contain a reference to this table ID
      *
      * @param innerTable    The table to join to this one
-     * @param isLeftJoin    Whether this table is a left join or not todo explain more what a left join is
+     * @param isLeftJoin    Whether innerTable should be queried even if no matching  exist with this
      * @param innerTableRef The columnName which refer to this table ID, without the table's name
      * @return The JOIN statement in the form "[LEFT ]JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.ID = INNER_TABLE[_ALIAS].INNER_TABLE_REF"
      */
@@ -766,7 +771,7 @@ public abstract class DBTable<T> extends DBData<T> {
      * Construct and return a JOIN statement where this table contain a reference to innerTable ID
      *
      * @param innerTable   The table to join to this one
-     * @param isLeftJoin   Whether this table is a left join or not todo explain more what a left join is
+     * @param isLeftJoin   Whether innerTable should be queried even if no matching  exist with this
      * @param thisTableRef The columnName which refer to the innerTable ID, without the table's name
      * @return The JOIN statement in the form "JOIN INNER_TABLE [AS INNER_TABLE_ALIAS] ON TABLE.THIS_TABLE_REF = INNER_TABLE[_ALIAS].ID"
      */
